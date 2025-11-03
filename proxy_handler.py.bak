@@ -1,0 +1,154 @@
+import requests
+from typing import Dict, Optional, Tuple
+import logging
+import json
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class NineProxyHandler:
+    def __init__(self):
+        self.api_url = "https://9proxy.com"
+        self.token = None
+        
+    def login(self, email: str, password: str) -> bool:
+        """Login to 9proxy and get authentication token"""
+        try:
+            headers = {
+                'authority': '9proxy.com',
+                'accept': 'application/json, text/plain, */*',
+                'accept-encoding': 'gzip, deflate, br, zstd',
+                'accept-language': 'en-US,en;q=0.9,vi;q=0.8,ja;q=0.7',
+                'content-type': 'application/json',
+                'origin': 'https://9proxy.com',
+                'priority': 'u=1, i',
+                'referer': 'https://9proxy.com/sign-in',
+                'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"macOS"',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
+                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+            }
+            
+            # Create a session to handle cookies
+            session = requests.Session()
+            
+            # Set cookie header directly
+            cookies = '_ga=GA1.1.511479866.1761677855; _fbp=fb.1.1761677856189.49957399312751512; _ym_uid=1761677857750118428; _ym_d=1761677857; _ym_isad=2; _ym_visorc=w; _clck=3finah%5E2%5Eg0j%5E0%5E2127; _uetsid=f7da1f30b42f11f0a3ecab01b1a73924; _uetvid=f7da1050b42f11f082560b6db00ad1a7; _clsk=wgjdyo%5E1761678539554%5E8%5E1%5Ey.clarity.ms%2Fcollect; _ga_0XT7RT591P=GS2.1.s1761677854$o1$g1$t1761678540$j60$l0$h0; _gcl_au=1.1.1002421554.1761677855.703787262.1761677867.1761678569'
+            headers['Cookie'] = cookies
+                '_ym_d': '1761677857',
+                '_ym_isad': '2',
+                '_ym_visorc': 'w',
+                '_clck': '3finah^2^g0j^0^2127',
+                '_uetsid': 'f7da1f30b42f11f0a3ecab01b1a73924',
+                '_uetvid': 'f7da1050b42f11f082560b6db00ad1a7',
+                '_clsk': 'wgjdyo^1761678539554^8^1^y.clarity.ms/collect',
+                '_ga_0XT7RT591P': 'GS2.1.s1761677854$o1$g1$t1761678540$j60$l0$h0',
+                '_gcl_au': '1.1.1002421554.1761677855.703787262.1761677867.1761678569'
+            }
+            
+            # Set cookies
+            for name, value in cookies.items():
+                session.cookies.set(name, value)
+                
+            # First get the tokens from the auth endpoint
+            response = session.post(
+                f"{self.api_url}/api/auth",
+                headers=headers,
+                json={
+                    "isRememberMe": "on",
+                    "email": email,
+                    "password": password
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('result', {}).get('tokens', {}).get('access', {}).get('token'):
+                    self.token = data['result']['tokens']['access']['token']
+                    logger.info("Login successful")
+                    return True
+                    
+            logger.error(f"Login failed: {response.text}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            return False
+        
+    def get_us_proxy(self) -> Tuple[bool, Dict]:
+        """
+        Fetch a US proxy from 9proxy API
+        Returns: (success, result)
+            success: bool indicating if proxy was fetched successfully
+            result: dict containing proxy details or error message
+        """
+        try:
+            if not self.token:
+                logger.error("Not logged in. Please call login() first")
+                return False, {"error": "Authentication required"}
+                
+            # Query parameters for US proxy
+            params = {
+                'country': 'US',
+                'num': 1,
+                't': 2  # JSON response format
+            }
+                
+            headers = {
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {self.token}'
+            }
+            
+            response = requests.get(
+                f"{self.proxy_api_url}/api/proxy",
+                params=params,
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                return False, {"error": f"API request failed with status {response.status_code}"}
+                
+            data = response.json()
+            
+            # Check if we got a successful response with proxy data
+            if data.get("error"):
+                return False, {"error": data.get("message", "Unknown error from 9proxy API")}
+                
+            # Get the first proxy from the data array
+            if not data.get("data") or not isinstance(data["data"], list) or not data["data"]:
+                return False, {"error": "No proxies returned from API"}
+                
+            proxy_str = data["data"][0]
+            # Parse proxy string (format could be ip:port or ip:port:username:password)
+            proxy_parts = proxy_str.split(":")
+            
+            if len(proxy_parts) == 2:
+                # Format: ip:port
+                proxy_info = {
+                    "host": proxy_parts[0],
+                    "port": proxy_parts[1],
+                    "username": None,
+                    "password": None
+                }
+            elif len(proxy_parts) == 4:
+                # Format: ip:port:username:password
+                proxy_info = {
+                    "host": proxy_parts[0],
+                    "port": proxy_parts[1],
+                    "username": proxy_parts[2],
+                    "password": proxy_parts[3]
+                }
+            else:
+                return False, {"error": f"Unknown proxy format: {proxy_str}"}
+                
+            return True, proxy_info
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
+            return False, {"error": f"Request failed: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return False, {"error": f"Unexpected error: {str(e)}"}
