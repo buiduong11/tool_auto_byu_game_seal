@@ -995,25 +995,24 @@ class OutlookRegistrationFlow:
                 logger.info("[STEP 7] Starting full purchase workflow...")
                 logger.info("="*70)
                 
-                # Chuẩn bị user data
+                # Kiểm tra card_data có được truyền vào không
+                if not card_data or not isinstance(card_data, dict):
+                    logger.error("✗ No card data provided! Cannot proceed with purchase.")
+                    return False
+                
+                # Lấy user data từ card_data (thông tin từ file data_ci.txt)
                 user_data = {
-                    'first_name': 'John',
-                    'last_name': 'Doe',
-                    'address': '123 Main St',
-                    'city': 'New York',
-                    'phone': '+1234567890'
+                    'first_name': card_data.get('name', 'John').split()[0] if card_data.get('name') else 'John',
+                    'last_name': card_data.get('name', 'Doe').split()[-1] if card_data.get('name') and len(card_data.get('name', '').split()) > 1 else 'Doe',
+                    'address': card_data.get('address', '123 Main St'),
+                    'city': card_data.get('city', 'New York'),
+                    'phone': card_data.get('phone', '+1234567890')
                 }
                 
-                # Sử dụng card_data được truyền vào, hoặc dùng default
-                if not card_data:
-                    card_data = {
-                        'number': '4111111111111111',
-                        'exp_date': '12/25',
-                        'cvv': '123',
-                        'zip': '75044',
-                        'city': 'Garland',
-                        'address': '209 Coral Ridge Dr'
-                    }
+                logger.info(f"Using card data from file:")
+                logger.info(f"  - Name: {card_data.get('name')}")
+                logger.info(f"  - Card: {card_data.get('number', '')[:4]}...{card_data.get('number', '')[-4:]}")
+                logger.info(f"  - Address: {card_data.get('address')}, {card_data.get('city')}, {card_data.get('state')} {card_data.get('zip')}")
                 
                 # Gọi full purchase workflow
                 if not self.gameseal_automation.run_full_purchase_workflow(user_data, card_data):
@@ -1043,27 +1042,42 @@ class OutlookRegistrationFlow:
             logger.info("="*70)
             
             # Start Chrome browser cho mail
+            logger.info("[FLOW] Starting browser...")
             if not self.start_browser():
+                logger.error("[FLOW] ✗ Failed at: start_browser()")
                 return False
+            logger.info("[FLOW] ✓ Browser started")
             
             # Không cần start Multilogin ở đây - gameseal_auto_login.py sẽ tự làm
             
             # Step 1: Login wmhotmail
+            logger.info("[FLOW] Step 1: Login wmhotmail...")
             if not self.login_wmhotmail():
+                logger.error("[FLOW] ✗ Failed at: login_wmhotmail()")
                 return False
+            logger.info("[FLOW] ✓ Step 1 completed")
             
             # Step 2: Login Outlook
+            logger.info("[FLOW] Step 2: Login Outlook...")
             if not self.login_outlook():
+                logger.error("[FLOW] ✗ Failed at: login_outlook()")
                 return False
+            logger.info("[FLOW] ✓ Step 2 completed")
             
             # Step 3: Get verification code from wmhotmail
+            logger.info("[FLOW] Step 3: Get verification code...")
             code = self.get_verification_code_from_wmhotmail()
             if not code:
+                logger.error("[FLOW] ✗ Failed at: get_verification_code_from_wmhotmail()")
                 return False
+            logger.info("[FLOW] ✓ Step 3 completed")
             
             # Step 4: Verify Outlook with code
+            logger.info("[FLOW] Step 4: Verify Outlook with code...")
             if not self.verify_outlook_with_code(code):
+                logger.error("[FLOW] ✗ Failed at: verify_outlook_with_code()")
                 return False
+            logger.info("[FLOW] ✓ Step 4 completed")
             
             # Step 5: Gọi gameseal_auto_login.py để xử lý phần GameSeal
             logger.info("\n" + "="*70)
@@ -1151,16 +1165,17 @@ class OutlookRegistrationFlow:
             
             # Step 6: Verify GameSeal account (sau khi register xong)
             logger.info("\n" + "="*70)
-            logger.info("[STEP 6] Verifying GameSeal account...")
+            logger.info("[FLOW] Step 6: Verifying GameSeal account...")
             logger.info("="*70)
             
             # Verify account và chạy purchase workflow với card data
             if not self.verify_gameseal_account(card_data):
-                logger.error("Failed to verify GameSeal account")
+                logger.error("[FLOW] ✗ Failed at: verify_gameseal_account()")
                 return False
+            logger.info("[FLOW] ✓ Step 6 completed")
             
             logger.info("\n" + "="*70)
-            logger.info("✅ FULL FLOW COMPLETED SUCCESSFULLY!")
+            logger.info("✅ [FLOW] FULL FLOW COMPLETED SUCCESSFULLY!")
             logger.info("="*70)
             
             return True
@@ -1275,13 +1290,31 @@ if __name__ == "__main__":
     if success:
         logger.info(f"✓ Mail set {current_index + 1} completed successfully!")
         
+        # MUA LẦN 2 - Giữ browser và profile, chỉ chạy lại checkout
+        logger.info("\n" + "="*70)
+        logger.info("🔄 PURCHASING AGAIN (2nd time)...")
+        logger.info("="*70)
+        
+        try:
+            # Chạy lại checkout với cùng card data
+            if flow.gameseal_automation and flow.gameseal_automation.driver:
+                second_purchase_success = flow.gameseal_automation.complete_checkout(card_data)
+                
+                if second_purchase_success:
+                    logger.info("✅ Second purchase completed successfully!")
+                else:
+                    logger.warning("⚠️ Second purchase failed, but first purchase was successful")
+        except Exception as e:
+            logger.error(f"Error during second purchase: {str(e)}")
+            logger.warning("⚠️ Second purchase failed, but first purchase was successful")
+        
         # Lưu index tiếp theo
         next_index = current_index + 1
         with open(index_file, 'w') as f:
             f.write(str(next_index))
         logger.info(f"Next run will process mail set {next_index + 1}/{len(mail_sets)}")
         
-        # Tự động đóng browsers để chuẩn bị cho lần chạy tiếp theo
+        # Tự động đóng browsers sau khi mua 2 lần xong
         logger.info("\n" + "="*70)
         logger.info("✓ Closing browsers...")
         logger.info("="*70)
@@ -1300,7 +1333,7 @@ if __name__ == "__main__":
             except Exception as e:
                 logger.error(f"Error closing Multilogin: {str(e)}")
         
-        logger.info("✓ Session completed. Ready for next run.")
+        logger.info("✓ Session completed (2 purchases). Ready for next run.")
     else:
         logger.error(f"✗ Mail set {current_index + 1} failed!")
         

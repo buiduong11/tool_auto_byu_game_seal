@@ -33,31 +33,61 @@ def count_mail_sets():
     except:
         return 0
 
+def count_card_sets():
+    """Đếm số lượng card sets"""
+    card_file = "data/data_ci/data_ci.txt"
+    try:
+        with open(card_file, 'r') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        # Mỗi dòng là 1 card
+        return len(lines)
+    except:
+        return 0
+
 def main():
     logger.info("="*70)
     logger.info("AUTO LOOP - CONTINUOUS REGISTRATION")
     logger.info("="*70)
     
-    total_sets = count_mail_sets()
-    logger.info(f"Total mail sets available: {total_sets}")
+    total_mail_sets = count_mail_sets()
+    total_card_sets = count_card_sets()
     
-    if total_sets == 0:
+    logger.info(f"Total mail sets available: {total_mail_sets}")
+    logger.info(f"Total card sets available: {total_card_sets}")
+    
+    # Số phiên chạy = min(mail, card)
+    total_runs = min(total_mail_sets, total_card_sets)
+    
+    if total_runs == 0:
+        logger.error("No data found! Need both mail and card data.")
+        return
+    
+    logger.info(f"Will run {total_runs} sessions (limited by {'mail' if total_mail_sets < total_card_sets else 'card'} data)")
+    
+    if total_mail_sets == 0:
         logger.error("No mail data found!")
+        return
+    
+    if total_card_sets == 0:
+        logger.error("No card data found!")
         return
     
     while True:
         current_index = read_current_index()
         
-        # Check nếu đã hết data
-        if current_index >= total_sets:
+        # Check nếu đã hết data (mail hoặc card)
+        if current_index >= total_runs:
             logger.info("\n" + "="*70)
-            logger.info("✅ ALL MAIL SETS COMPLETED!")
+            logger.info("✅ ALL SESSIONS COMPLETED!")
             logger.info("="*70)
-            logger.info(f"Processed {total_sets} mail sets successfully.")
+            logger.info(f"Processed {total_runs} sessions successfully.")
+            logger.info(f"Mail data: {current_index}/{total_mail_sets}")
+            logger.info(f"Card data: {current_index}/{total_card_sets}")
             break
         
         logger.info("\n" + "="*70)
-        logger.info(f"PROCESSING MAIL SET {current_index + 1}/{total_sets}")
+        logger.info(f"PROCESSING SESSION {current_index + 1}/{total_runs}")
+        logger.info(f"Mail: {current_index + 1}/{total_mail_sets} | Card: {current_index + 1}/{total_card_sets}")
         logger.info("="*70)
         
         # Chạy outlook_registration.py

@@ -166,7 +166,7 @@ class MultiLoginHandler:
                         "startup_behavior": "recover"
                     },
                     "storage": {
-                        "is_local": True,
+                        "is_local": False,  # Cloud storage (không phải Local)
                         "save_service_worker": True
                     },
                     "proxy": {
@@ -347,6 +347,40 @@ class MultiLoginHandler:
                 return profile.get("id")
         
         return None
+    
+    def delete_profile(self, profile_id: str) -> Tuple[bool, Dict]:
+        """
+        Delete a profile
+        
+        Args:
+            profile_id: The profile ID to delete
+            
+        Returns:
+            (success, result)
+        """
+        try:
+            url = f"{self.api_url}/profile/remove"
+            data = {
+                "ids": [profile_id],
+                "permanently": False  # Xóa vào trash, không xóa vĩnh viễn
+            }
+            
+            response = requests.post(
+                url,
+                json=data,
+                headers=self.get_headers()
+            )
+            
+            if response.status_code not in [200, 201]:
+                logger.error(f"Failed to delete profile: {response.status_code} - {response.text}")
+                return False, {"error": f"Failed to delete profile: {response.status_code}"}
+            
+            logger.info(f"Profile {profile_id} deleted successfully")
+            return True, {"status": "deleted", "profile_id": profile_id}
+            
+        except Exception as e:
+            logger.error(f"Error deleting profile: {str(e)}")
+            return False, {"error": f"Error deleting profile: {str(e)}"}
     
     def verify_proxy(self, automation_port: int) -> Tuple[bool, Dict]:
         """

@@ -272,64 +272,12 @@ class GameSealAutoLogin:
                 time.sleep(2)  # Đợi search suggest xuất hiện
             
             # Click vào item sản phẩm từ search suggest
-            logger.info("\n[STEP 3] Clicking product from search suggest...")
+            logger.info("\n[STEP 3] Clicking product from search suggest (Product 1)...")
             product_link = self.wait_for_element(By.CSS_SELECTOR,
                 "#searchCollapse > div > form > div.search-suggest.js-search-result > ul > li.search-suggest-product.js-result > a",
                 timeout=10)
-            if not product_link:
-                logger.error("✗ Product link not found!")
-                return False
-            
-            # DÙNG JAVASCRIPT CLICK ĐỂ VƯỢT QUA POPUP "No thanks"
-            logger.info("\n[STEP 3.2] Clicking product link...")
-            current_url_before = self.driver.current_url
-            
-            # Thử JavaScript click trước (vượt qua popup)
-            try:
-                logger.info("Trying JavaScript click to bypass popup...")
-                self.driver.execute_script("arguments[0].click();", product_link)
-                logger.info("✓ Clicked product with JavaScript")
-                time.sleep(2)
-            except:
-                # Nếu JavaScript fail, thử click thông thường
-                logger.info("JavaScript click failed, trying normal click...")
-                self.click_element(product_link, wait_time=3)
-            
-            # VERIFY: Check xem đã chuyển sang product page chưa
-            logger.info("\n[STEP 3.3] Verifying product page opened...")
-            time.sleep(3)
-            current_url_after = self.driver.current_url
-            
-            # Check nếu URL có chứa "product" hoặc đã khác URL ban đầu
-            if "/product/" in current_url_after or "product" in current_url_after.lower():
-                logger.info(f"✓ Product page opened: {current_url_after}")
-            elif current_url_after != current_url_before:
-                # URL đã thay đổi, có thể đã vào product page
-                logger.info(f"✓ Page changed to: {current_url_after}")
-            else:
-                # URL không đổi - thử tìm lại product link và click
-                logger.warning("⚠️ Product page may not have opened - trying to find and click again...")
-                try:
-                    # Tìm lại product link (element mới)
-                    new_product_link = self.wait_for_element(By.CSS_SELECTOR, 
-                        "#searchCollapse > div > form > div.search-suggest.js-search-result > ul > li.search-suggest-product.js-result > a", 
-                        timeout=5)
-                    if new_product_link:
-                        self.driver.execute_script("arguments[0].click();", new_product_link)
-                        time.sleep(3)
-                        
-                        # Check lại
-                        final_url = self.driver.current_url
-                        if "/product/" not in final_url and "product" not in final_url.lower():
-                            logger.error("✗ Failed to open product page after retry!")
-                            return False
-                        logger.info(f"✓ Product page opened after retry: {final_url}")
-                    else:
-                        logger.error("✗ Could not find product link again!")
-                        return False
-                except Exception as e:
-                    logger.error(f"✗ Failed to retry click product: {str(e)}")
-                    return False
+            if product_link:
+                self.click_element(product_link, wait_time=2)
             
             # Click Buy Now (bỏ qua Add to Cart)
             logger.info("\n[STEP 4] Clicking Buy Now...")
@@ -349,28 +297,24 @@ class GameSealAutoLogin:
                 self.click_element(go_to_payment_btn, wait_time=2)
                 logger.info("✓ Clicked 'Go to payment'")
             
-            # Chọn VISA payment option
+            # Chọn VISA payment option (div đầu tiên)
             logger.info("\n[STEP 6] Selecting VISA payment option...")
             
-            # Thử nhiều selector cho VISA option - PHẢI TÌM THEO NỘI DUNG, KHÔNG DÙNG nth-child
+            # Thử nhiều selector cho VISA option
             visa_selectors = [
-                # Tìm theo text "Visa" hoặc "Credit and debit cards"
-                (By.XPATH, "//label[contains(., 'Visa') or contains(., 'Credit and debit cards')]"),
-                (By.XPATH, "//span[contains(text(), 'Credit and debit cards')]//ancestor::label"),
-                (By.XPATH, "//label[contains(text(), 'Visa')]"),
-                # Tìm theo img có Visa
-                (By.XPATH, "//img[contains(@alt, 'Visa') or contains(@src, 'visa')]//ancestor::label"),
-                (By.XPATH, "//img[contains(@alt, 'VISA')]//parent::*/parent::label"),
+                (By.CSS_SELECTOR, "#changePaymentForm > div > div:nth-child(1) > div > div > label"),
+                (By.CSS_SELECTOR, "#changePaymentForm > div > div:nth-child(1)"),
+                (By.XPATH, "//label[contains(., 'Credit and debit cards payment')]"),
+                (By.XPATH, "//div[contains(@class, 'payment-option')]//img[@alt='Visa']//ancestor::label")
             ]
             
             payment_option = None
             for by, selector in visa_selectors:
                 try:
-                    logger.info(f"[STEP 6] Trying VISA selector: {selector}")
+                    logger.info(f"Trying VISA selector: {selector}")
                     payment_option = self.wait_for_element(by, selector, timeout=5)
                     if payment_option:
-                        logger.info(f"✅ [STEP 6] SUCCESS with VISA selector: {by} = '{selector}'")
-                        logger.info(f"🔧 [STEP 6] UPDATE CODE: Use this selector directly!")
+                        logger.info(f"✓ Found VISA option with: {selector}")
                         break
                 except:
                     continue
@@ -479,147 +423,30 @@ class GameSealAutoLogin:
             
             # B12: Click Pay button
             logger.info("\n[B12] Clicking Pay button...")
-            
-            # Thử nhiều selector cho Pay button
-            pay_selectors = [
-                # Selector chính xác từ user - ưu tiên cao nhất
-                (By.CSS_SELECTOR, "body > app-root > app-select-payment-method > div > div.drawer-container.ng-tns-c2010829045-0 > div > div.payment-details-desktop.mobile-d-none.ng-tns-c2010829045-0 > div.payment-details-body.ng-tns-c2010829045-0 > div.button-section.ng-tns-c2010829045-0 > button > div > span"),
-                # Backup selectors
-                (By.CSS_SELECTOR, "body > app-root > app-select-payment-method > div > div.drawer-container.ng-tns-c2010829045-0 > div > div.payment-details-desktop.mobile-d-none.ng-tns-c2010829045-0 > div.payment-details-body.ng-tns-c2010829045-0 > div.button-section.ng-tns-c2010829045-0 > button"),
-                (By.CSS_SELECTOR, "div.button-section button"),
-                (By.XPATH, "//button[contains(text(), 'Pay') or contains(text(), 'PAY')]"),
-                (By.CSS_SELECTOR, "button.btn-primary[type='submit']"),
-                (By.CSS_SELECTOR, "button[type='submit']"),
-            ]
-            
-            pay_btn = None
-            for by, selector in pay_selectors:
-                try:
-                    logger.info(f"[B12] Trying Pay button selector: {selector}")
-                    pay_btn = self.wait_for_element(by, selector, timeout=5)
-                    if pay_btn:
-                        logger.info(f"✅ [B12] SUCCESS with Pay button: {by} = '{selector}'")
-                        logger.info(f"🔧 [B12] UPDATE CODE: Use this selector directly!")
-                        break
-                except:
-                    continue
-            
-            if not pay_btn:
-                logger.error("✗ Pay button not found with any selector!")
-                return False
-            
-            self.click_element(pay_btn, wait_time=2)
-            logger.info("✓ Payment submitted!")
-            
-            # Đợi payment process (tăng thời gian đợi)
-            logger.info("\n[B13] Waiting for payment to process...")
-            time.sleep(10)
-            
-            # Check payment status - KỸ LƯỠNG
-            logger.info("\n[B14] Checking payment status...")
-            
-            # CHECK FAILED TRƯỚC (vì failed message rõ ràng hơn)
-            failed_selectors = [
-                # Text cụ thể cho failed
-                (By.XPATH, "//*[contains(text(), 'Transaction not authenticated')]"),
-                (By.XPATH, "//*[contains(text(), 'failed authentication')]"),
-                (By.XPATH, "//*[contains(text(), 'transaction failed')]"),
-                (By.XPATH, "//h1[contains(text(), 'Failed') or contains(text(), 'Error')]"),
-                (By.XPATH, "//*[contains(text(), 'declined')]"),
-                # Loader separator (indicator của failed)
-                (By.CSS_SELECTOR, "body > app-root > app-return > div > div > zen-payment-status-loader > div > div.loader-separator > div"),
-            ]
-            
-            failed_found = False
-            for by, selector in failed_selectors:
-                try:
-                    failed_elem = self.wait_for_element(by, selector, timeout=3)
-                    if failed_elem:
-                        # Verify bằng cách check text
-                        try:
-                            elem_text = failed_elem.text.lower()
-                            if "not authenticated" in elem_text or "failed" in elem_text or "declined" in elem_text or "error" in elem_text:
-                                logger.error(f"❌ Found FAILED indicator: {selector}")
-                                logger.error(f"   Text: {failed_elem.text}")
-                                failed_found = True
-                                break
-                        except:
-                            # Nếu không có text, vẫn coi là failed nếu tìm thấy element
-                            logger.error(f"❌ Found FAILED indicator: {selector}")
-                            failed_found = True
-                            break
-                except:
-                    continue
-            
-            # Xử lý kết quả
-            if failed_found:
-                logger.error("❌ PAYMENT FAILED!")
-                logger.error("Stopping workflow - need new proxy and profile")
-                return False
-            
-            # Nếu không failed, check success
-            success_selectors = [
-                (By.XPATH, "//*[contains(text(), 'Payment successful')]"),
-                (By.XPATH, "//*[contains(text(), 'Thank you for your purchase')]"),
-                (By.XPATH, "//h1[contains(text(), 'Success') or contains(text(), 'Thank you')]"),
-                (By.XPATH, "//*[contains(text(), 'Order confirmed')]"),
-            ]
-            
-            success_found = False
-            for by, selector in success_selectors:
-                try:
-                    success_elem = self.wait_for_element(by, selector, timeout=3)
-                    if success_elem:
-                        logger.info(f"✅ Found SUCCESS indicator: {selector}")
-                        logger.info(f"   Text: {success_elem.text}")
-                        success_found = True
-                        break
-                except:
-                    continue
-            
-            if success_found:
-                logger.info("✅ PAYMENT SUCCESS!")
+            pay_btn = self.wait_for_element(By.CSS_SELECTOR,
+                "body > app-root > app-select-payment-method > div > div.drawer-container.ng-tns-c2010829045-0 > div > div.payment-details-desktop.mobile-d-none.ng-tns-c2010829045-0 > div.payment-details-body.ng-tns-c2010829045-0 > div.button-section.ng-tns-c2010829045-0 > button > div > span",
+                timeout=10)
+            if pay_btn:
+                self.click_element(pay_btn, wait_time=2)
+                logger.info("✓ Payment submitted!")
                 
-                # Tìm và click "Back to home" button
-                logger.info("\n[B15] Looking for 'Back to home' button...")
-                back_home_selectors = [
-                    (By.XPATH, "//a[contains(text(), 'Back to home') or contains(text(), 'Home')]"),
-                    (By.XPATH, "//button[contains(text(), 'Back to home') or contains(text(), 'Home')]"),
-                    (By.CSS_SELECTOR, "a[href='/']"),
-                    (By.XPATH, "//a[contains(@href, '/')]"),
-                ]
+                # Đợi payment process
+                time.sleep(5)
                 
-                back_home_btn = None
-                for by, selector in back_home_selectors:
-                    try:
-                        logger.info(f"Trying Back to home selector: {selector}")
-                        back_home_btn = self.wait_for_element(by, selector, timeout=5)
-                        if back_home_btn:
-                            logger.info(f"✅ Found Back to home: {selector}")
-                            break
-                    except:
-                        continue
+                # Check payment status
+                logger.info("\n[B13] Checking payment status...")
+                failed_indicator = self.wait_for_element(By.CSS_SELECTOR,
+                    "body > app-root > app-return > div > div > zen-payment-status-loader > div > div.loader-separator > div",
+                    timeout=10)
                 
-                if back_home_btn:
-                    self.click_element(back_home_btn, wait_time=2)
-                    logger.info("✓ Clicked 'Back to home'")
+                if failed_indicator:
+                    logger.error("❌ Payment FAILED!")
+                    return False
                 else:
-                    # Nếu không tìm thấy button, navigate trực tiếp
-                    logger.info("Back to home button not found, navigating directly...")
-                    self.driver.get("https://gameseal.com")
-                    time.sleep(2)
-                
-                # Đợi 3 phút trước khi mua tiếp
-                logger.info("\n⏰ Waiting 3 minutes before next purchase...")
-                time.sleep(180)  # 3 phút = 180 giây
-                
-                logger.info("✅ Ready for next purchase!")
-                return True
-            else:
-                # Không tìm thấy success hay failed - không chắc chắn
-                logger.warning("⚠️ Payment status UNCLEAR - no success or failed indicator found")
-                logger.warning("Assuming FAILED for safety")
-                return False
+                    logger.info("✅ Payment SUCCESS!")
+                    return True
+            
+            return False
             
         except Exception as e:
             logger.error(f"Error during checkout: {str(e)}")
@@ -681,7 +508,7 @@ class GameSealAutoLogin:
             # B3: Click move to home (đã có trong fill_profile_form - click logo)
             logger.info("✓ Returned to home")
             
-            # B4-B12: VÒNG LẶP MUA HÀNG VÔ HẠN
+            # B4-B12: Complete checkout (search, product, buy, payment)
             # Method complete_checkout() ĐÃ CÓ ĐẦY ĐỦ:
             # - Search product
             # - Click product từ search result
@@ -691,30 +518,13 @@ class GameSealAutoLogin:
             # - Billing address (street, postcode, city, country)
             # - Card info
             # - Pay button
-            # - Check payment status
-            # - Nếu SUCCESS: Back to home + đợi 3 phút + return True
-            # - Nếu FAILED: return False
+            logger.info("\n[B4-B12] Running complete checkout flow...")
+            if not self.complete_checkout(card_data):
+                logger.error("Failed to complete checkout")
+                return False
             
-            purchase_count = 0
-            while True:
-                purchase_count += 1
-                logger.info("\n" + "=" * 70)
-                logger.info(f"[PURCHASE #{purchase_count}] Starting purchase workflow...")
-                logger.info("=" * 70)
-                
-                # Gọi complete_checkout để mua hàng
-                purchase_result = self.complete_checkout(card_data)
-                
-                if not purchase_result:
-                    # Payment FAILED - dừng workflow, cần proxy và profile mới
-                    logger.error("✗ Purchase workflow failed!")
-                    logger.error("❌ STOPPING - Need new proxy and profile")
-                    return False
-                else:
-                    # Payment SUCCESS - đã đợi 3 phút và back to home trong complete_checkout
-                    logger.info(f"✅ Purchase #{purchase_count} COMPLETED!")
-                    logger.info("🔄 Continuing to next purchase...")
-                    # Vòng lặp sẽ tiếp tục mua hàng tiếp theo
+            logger.info("\n✅ FULL PURCHASE WORKFLOW COMPLETED!")
+            return True
             
         except Exception as e:
             logger.error(f"\n✗ LỖI: {str(e)}")
@@ -1046,159 +856,60 @@ class GameSealAutoLogin:
 
 
 def main():
-    """Main function với RETRY VÔ HẠN - Nếu payment failed thì tạo profile mới và chạy lại"""
+    """Main function để test"""
     from multilogin import MultiLoginHandler
-    from config import DEFAULT_FOLDER_ID
     
     # Thông tin đăng nhập
     EMAIL = "conn6ecrosson655@outlook.com"  # Outlook email
     PASSWORD = "aH6hfAdsRZ35"  # Outlook password
+    PROFILE_ID = "4e32caab-be06-45e2-8691-aaa66400c776"  # walmart CA 6
     
-    # Thông tin proxy (cần có để tạo profile)
-    PROXY_INFO = {
-        "type": "socks5",
-        "host": "gate.multilogin.com",
-        "port": 1080,
-        "username": "2235429732_bbc46d7e_5347_4033_92a1_e1d408197340_multilogin_com-country-any-sid-ArtbebDS-ttl-1m-filter-medium",
-        "password": "xqlqxf8orn"
-    }
+    # Start Multilogin profile
+    logger.info("Starting Multilogin profile...")
+    multilogin_handler = MultiLoginHandler()
     
-    retry_count = 0
+    # Login
+    login_success, login_result = multilogin_handler.login()
+    if not login_success:
+        logger.error(f"Failed to login to Multilogin: {login_result.get('error')}")
+        return False
     
-    # VÒNG LẶP VÔ HẠN - Retry khi payment failed
-    while True:
-        retry_count += 1
-        profile_id = None
-        multilogin_handler = None
-        
-        try:
-            logger.info("\n" + "="*70)
-            logger.info(f"ATTEMPT #{retry_count}: TẠO PROFILE -> START -> ĐĂNG KÝ -> MUA HÀNG")
-            logger.info("="*70)
-            
-            # Bước 1: Login vào Multilogin
-            logger.info("\n[STEP 1] Logging in to Multilogin...")
-            multilogin_handler = MultiLoginHandler()
-            login_success, login_result = multilogin_handler.login()
-            if not login_success:
-                logger.error(f"Failed to login to Multilogin: {login_result.get('error')}")
-                continue  # Skip to next retry
-            logger.info("✓ Logged in to Multilogin")
-            
-            # Bước 2: Tạo profile mới
-            logger.info("\n[STEP 2] Creating new profile...")
-            profile_name = f"GameSeal_{EMAIL.split('@')[0]}_{retry_count}"
-            create_success, create_result = multilogin_handler.create_profile(
-                proxy_info=PROXY_INFO,
-                folder_id=DEFAULT_FOLDER_ID,
-                profile_name=profile_name
-            )
-            
-            if not create_success:
-                logger.error(f"Failed to create profile: {create_result.get('error')}")
-                continue  # Skip to next retry
-            
-            profile_id = create_result.get("profile_id")
-            logger.info(f"✓ Profile created: {profile_id}")
-            
-            # Bước 3: Start profile
-            logger.info("\n[STEP 3] Starting profile...")
-            success, start_result = multilogin_handler.start_profile(profile_id, DEFAULT_FOLDER_ID)
-            if not success:
-                logger.error(f"Failed to start profile: {start_result.get('error')}")
-                continue  # Skip to next retry
-            
-            debug_port = start_result.get("selenium_port")
-            if not debug_port:
-                logger.error("No debug port returned")
-                continue  # Skip to next retry
-            
-            logger.info(f"✓ Profile started on port: {debug_port}")
-            
-            # Bước 4: Tạo automation instance và kết nối
-            logger.info("\n[STEP 4] Connecting to browser...")
-            automation = GameSealAutoLogin(
-                email=EMAIL,
-                password=PASSWORD,
-                debug_port=int(debug_port),
-                register_email=EMAIL,
-                register_password=PASSWORD
-            )
-            
-            if not automation.connect_to_browser():
-                logger.error("Cannot connect to browser!")
-                continue  # Skip to next retry
-            logger.info("✓ Connected to browser")
-            
-            # Bước 5: Chạy workflow ĐĂNG KÝ
-            logger.info("\n[STEP 5] Running registration workflow...")
-            registration_success = automation.run_registration_workflow()
-            
-            if not registration_success:
-                logger.error("❌ Registration failed - will retry with new profile")
-                continue  # Skip to next retry
-            
-            logger.info("✅ Registration completed!")
-            
-            # Bước 6: Chạy workflow MUA HÀNG (VÔ HẠN)
-            logger.info("\n[STEP 6] Running purchase workflow...")
-            
-            # Chuẩn bị data
-            user_data = {
-                'first_name': 'John',
-                'last_name': 'Doe',
-                'address': '209 Coral Ridge Dr',
-                'city': 'Garland',
-                'phone': '+1234567890'
-            }
-            
-            card_data = {
-                'number': '4111111111111111',
-                'exp_date': '12/25',
-                'cvv': '123',
-                'address': '209 Coral Ridge Dr',
-                'zip': '75044',
-                'city': 'Garland'
-            }
-            
-            # Gọi run_full_purchase_workflow - có vòng lặp vô hạn bên trong
-            purchase_success = automation.run_full_purchase_workflow(user_data, card_data)
-            
-            if not purchase_success:
-                # Payment FAILED - cleanup và retry với profile mới
-                logger.error("❌ Purchase workflow failed - will retry with new profile")
-            else:
-                # Không bao giờ đến đây vì có vòng lặp vô hạn bên trong
-                logger.info("✅ Purchase workflow completed (should not reach here)")
-            
-        except Exception as e:
-            logger.error(f"\n❌ Error in attempt #{retry_count}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-        finally:
-            # Cleanup: Xóa profile sau mỗi attempt (thành công hay thất bại)
-            if profile_id and multilogin_handler:
-                logger.info("\n[STEP 6] Cleaning up - Deleting profile...")
-                try:
-                    # Stop profile trước khi xóa
-                    multilogin_handler.stop_profile(profile_id, DEFAULT_FOLDER_ID)
-                    time.sleep(2)
-                    
-                    # Xóa profile
-                    delete_success, delete_result = multilogin_handler.delete_profile(profile_id)
-                    if delete_success:
-                        logger.info(f"✓ Profile {profile_id} deleted successfully")
-                    else:
-                        logger.warning(f"Failed to delete profile: {delete_result.get('error')}")
-                except Exception as e:
-                    logger.warning(f"Error during cleanup: {str(e)}")
-        
-        # Đợi một chút trước khi retry (nếu failed)
-        logger.info("\n⏰ Waiting 5 seconds before retry...")
-        time.sleep(5)
-        logger.info("🔄 Retrying with new profile and proxy...")
-        # Vòng lặp while True sẽ tự động tiếp tục
+    # Start profile
+    success, start_result = multilogin_handler.start_profile(PROFILE_ID)
+    if not success:
+        logger.error(f"Failed to start profile: {start_result.get('error')}")
+        return False
+    
+    debug_port = start_result.get("selenium_port")
+    if not debug_port:
+        logger.error("No debug port returned")
+        return False
+    
+    logger.info(f"✓ Profile started on port: {debug_port}")
+    
+    # Tạo automation instance
+    automation = GameSealAutoLogin(
+        email=EMAIL,
+        password=PASSWORD,
+        debug_port=int(debug_port),
+        register_email=EMAIL,
+        register_password=PASSWORD
+    )
+    
+    # Kết nối với browser
+    if not automation.connect_to_browser():
+        logger.error("Cannot connect to browser!")
+        return False
+    
+    # Chạy workflow
+    success = automation.run_login_workflow()
+    
+    if success:
+        logger.info("\n✅ SUCCESS! Registration workflow completed")
+    else:
+        logger.error("\n❌ FAILED! Registration workflow failed")
+    
+    return success
 
 
 if __name__ == "__main__":

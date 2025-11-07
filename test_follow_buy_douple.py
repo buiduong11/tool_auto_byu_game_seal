@@ -266,21 +266,60 @@ class GameSealAutoLogin:
                 "input.form-control.header-search-input", timeout=5)
             if search_input:
                 search_keyword = "Walmart Gift Card 7 USD Key - UNITED STATES"
-                self.click_element(search_input, wait_time=0.5)
+                # Dùng JavaScript click để tránh bị che bởi element khác
+                try:
+                    self.driver.execute_script("arguments[0].click();", search_input)
+                    logger.info("✓ Clicked search input (JavaScript)")
+                except:
+                    self.click_element(search_input, wait_time=0.5)
+                time.sleep(0.5)
                 self.type_text_human_like(search_input, search_keyword)
                 logger.info(f"✓ Entered search: {search_keyword}")
                 time.sleep(2)  # Đợi search suggest xuất hiện
             
             # Click vào item sản phẩm từ search suggest
-            logger.info("\n[STEP 3] Clicking product from search suggest...")
-            product_link = self.wait_for_element(By.CSS_SELECTOR,
-                "#searchCollapse > div > form > div.search-suggest.js-search-result > ul > li.search-suggest-product.js-result > a",
-                timeout=10)
+            logger.info("\n[STEP 3] Clicking product from search suggest (Product 1)...")
+            
+            # Thử nhiều selector cho product link
+            product_selectors = [
+                # Selector cũ - ƯU TIÊN CAO NHẤT (đúng rồi, chỉ cần đợi lâu hơn)
+                (By.CSS_SELECTOR, "#searchCollapse > div > form > div.search-suggest.js-search-result > ul > li.search-suggest-product.js-result > a"),
+                (By.CSS_SELECTOR, "li.search-suggest-product a"),
+                (By.CSS_SELECTOR, ".search-suggest-product a"),
+                (By.XPATH, "//li[contains(@class, 'search-suggest-product')]//a"),
+                # Backup selectors
+                (By.CSS_SELECTOR, ".js-search-result li a"),
+                (By.XPATH, "//div[contains(@class, 'search-suggest')]//a[contains(@href, '/product/')]"),
+                (By.XPATH, "//a[contains(@href, '/product/') and contains(., 'Walmart')]"),
+                (By.CSS_SELECTOR, ".search-suggest a"),
+                (By.XPATH, "//div[contains(@class, 'search')]//a[contains(@href, 'product')]"),
+            ]
+            
+            product_link = None
+            for by, selector in product_selectors:
+                try:
+                    logger.info(f"[STEP 3] Trying product selector: {selector}")
+                    # Tăng timeout lên 10s để đợi search suggest load
+                    product_link = self.wait_for_element(by, selector, timeout=10)
+                    if product_link:
+                        logger.info(f"✅ [STEP 3] SUCCESS with product selector: {by} = '{selector}'")
+                        logger.info(f"🔧 [STEP 3] UPDATE CODE: Use this selector directly!")
+                        break
+                except:
+                    continue
+            
             if not product_link:
-                logger.error("✗ Product link not found!")
+                logger.error("✗ Product link not found in search suggest!")
+                # Take screenshot
+                try:
+                    screenshot_path = f"/tmp/product_not_found_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                except:
+                    pass
                 return False
             
-            # DÙNG JAVASCRIPT CLICK ĐỂ VƯỢT QUA POPUP "No thanks"
+            # Click vào product - DÙNG JAVASCRIPT ĐỂ VƯỢT QUA POPUP
             logger.info("\n[STEP 3.2] Clicking product link...")
             current_url_before = self.driver.current_url
             
@@ -349,7 +388,7 @@ class GameSealAutoLogin:
                 self.click_element(go_to_payment_btn, wait_time=2)
                 logger.info("✓ Clicked 'Go to payment'")
             
-            # Chọn VISA payment option
+            # Chọn VISA payment option (div đầu tiên)
             logger.info("\n[STEP 6] Selecting VISA payment option...")
             
             # Thử nhiều selector cho VISA option - PHẢI TÌM THEO NỘI DUNG, KHÔNG DÙNG nth-child
@@ -508,6 +547,7 @@ class GameSealAutoLogin:
                 logger.error("✗ Pay button not found with any selector!")
                 return False
             
+            # Click Pay button
             self.click_element(pay_btn, wait_time=2)
             logger.info("✓ Payment submitted!")
             
@@ -681,7 +721,7 @@ class GameSealAutoLogin:
             # B3: Click move to home (đã có trong fill_profile_form - click logo)
             logger.info("✓ Returned to home")
             
-            # B4-B12: VÒNG LẶP MUA HÀNG VÔ HẠN
+            # B4-B12: Complete checkout (search, product, buy, payment)
             # Method complete_checkout() ĐÃ CÓ ĐẦY ĐỦ:
             # - Search product
             # - Click product từ search result
@@ -691,30 +731,13 @@ class GameSealAutoLogin:
             # - Billing address (street, postcode, city, country)
             # - Card info
             # - Pay button
-            # - Check payment status
-            # - Nếu SUCCESS: Back to home + đợi 3 phút + return True
-            # - Nếu FAILED: return False
+            logger.info("\n[B4-B12] Running complete checkout flow...")
+            if not self.complete_checkout(card_data):
+                logger.error("Failed to complete checkout")
+                return False
             
-            purchase_count = 0
-            while True:
-                purchase_count += 1
-                logger.info("\n" + "=" * 70)
-                logger.info(f"[PURCHASE #{purchase_count}] Starting purchase workflow...")
-                logger.info("=" * 70)
-                
-                # Gọi complete_checkout để mua hàng
-                purchase_result = self.complete_checkout(card_data)
-                
-                if not purchase_result:
-                    # Payment FAILED - dừng workflow, cần proxy và profile mới
-                    logger.error("✗ Purchase workflow failed!")
-                    logger.error("❌ STOPPING - Need new proxy and profile")
-                    return False
-                else:
-                    # Payment SUCCESS - đã đợi 3 phút và back to home trong complete_checkout
-                    logger.info(f"✅ Purchase #{purchase_count} COMPLETED!")
-                    logger.info("🔄 Continuing to next purchase...")
-                    # Vòng lặp sẽ tiếp tục mua hàng tiếp theo
+            logger.info("\n✅ FULL PURCHASE WORKFLOW COMPLETED!")
+            return True
             
         except Exception as e:
             logger.error(f"\n✗ LỖI: {str(e)}")
@@ -816,19 +839,189 @@ class GameSealAutoLogin:
             traceback.print_exc()
             return False
     
-    def run_registration_workflow(self):
-        """Chạy workflow ĐĂNG KÝ với manual button click"""
+    # ============================================================================
+    # FLOW ĐĂNG KÝ - COMMENT LẠI ĐỂ TIẾT KIỆM TÀI NGUYÊN
+    # Lý do: Không cần test quy trình đăng ký vì tốn tài nguyên mail và proxy
+    # Mục đích: Chỉ test flow mua hàng
+    # ============================================================================
+    # def run_registration_workflow(self):
+    #     """Chạy workflow ĐĂNG KÝ với manual button click"""
+    #     try:
+    #         logger.info("\n" + "="*70)
+    #         logger.info("GAMESEAL REGISTRATION WORKFLOW")
+    #         logger.info("="*70)
+    #         
+    #         # Bước 1: Mở trang GameSeal
+    #         logger.info("\n[STEP 1] Opening GameSeal homepage...")
+    #         self.driver.get("https://gameseal.com")
+    #         time.sleep(5)
+    #         
+    #         # Bước 1.5: Đóng cookie popup
+    #         logger.info("\n[STEP 1.5] Closing cookie popup...")
+    #         try:
+    #             cookie_btn = self.wait_for_element(By.CSS_SELECTOR, "button.cky-btn.cky-btn-accept", timeout=5)
+    #             if cookie_btn:
+    #                 self.click_element(cookie_btn, wait_time=1)
+    #                 logger.info("✓ Closed cookie popup")
+    #         except:
+    #             logger.info("No cookie popup or already closed")
+    #         
+    #         # Bước 2: Click Account button
+    #         logger.info("\n[STEP 2] Clicking Account button...")
+    #         account_btn = self.wait_for_element(By.CSS_SELECTOR, "#accountWidget", timeout=15)
+    #         if not account_btn:
+    #             logger.error("Account button not found!")
+    #             return False
+    #         
+    #         self.human_delay(1, 2)
+    #         if not self.click_element(account_btn, wait_time=2):
+    #             return False
+    #         
+    #         # Bước 3: Click REGISTER link
+    #         logger.info("\n[STEP 3] Clicking REGISTER link...")
+    #         register_link = self.wait_for_element(By.CSS_SELECTOR, 'a.register-link[href="/account/register"]', timeout=5)
+    #         if not register_link:
+    #             logger.error("Register link not found!")
+    #             return False
+    #         
+    #         self.human_delay(0.5, 1.5)
+    #         if not self.click_element(register_link, wait_time=2):
+    #             return False
+    #         
+    #         # Bước 4: KHÔNG TỰ ĐỘNG ĐIỀN - CHỜ USER NHẬP
+    #         logger.info("\n[STEP 4] Waiting for registration page to load...")
+    #         
+    #         # Đợi form load
+    #         email_input = self.wait_for_element(By.CSS_SELECTOR, 'input[type="email"]', timeout=10)
+    #         if not email_input:
+    #             logger.error("Registration form not found!")
+    #             return False
+    #         
+    #         # Đợi thêm để trang load hoàn toàn
+    #         time.sleep(2)
+    #         
+    #         # PRINT THÔNG TIN CHO USER
+    #         logger.info("\n" + "="*70)
+    #         logger.info("📝 PLEASE FILL THE REGISTRATION FORM MANUALLY")
+    #         logger.info("="*70)
+    #         logger.info(f"📧 Email:    {self.register_email}")
+    #         logger.info(f"🔑 Password: {self.register_password}")
+    #         logger.info("="*70)
+    #         logger.info("⚠️  IMPORTANT:")
+    #         logger.info("   1. Enter the email above")
+    #         logger.info("   2. Enter the password above (twice)")
+    #         logger.info("   3. Check the newsletter checkbox (optional)")
+    #         logger.info("   4. Click the CONTINUE button")
+    #         logger.info("="*70)
+    #         
+    #         # CHỜ USER CLICK CONTINUE BUTTON
+    #         logger.info("\n" + "="*70)
+    #         logger.info("⏸️  WAITING FOR USER TO CLICK 'CONTINUE' BUTTON")
+    #         logger.info("="*70)
+    #         logger.info("Please click the CONTINUE button manually to proceed...")
+    #         
+    #         # Check button state trước
+    #         try:
+    #             button_check = self.driver.execute_script("""
+    #                 var btn = document.querySelector('button.btn-primary');
+    #                 if (btn) {
+    #                     return {
+    #                         text: btn.textContent.trim(),
+    #                         disabled: btn.disabled,
+    #                         classes: btn.className
+    #                     };
+    #                 }
+    #                 return null;
+    #             """)
+    #             logger.info(f"Button state before click: {button_check}")
+    #         except Exception as e:
+    #             logger.warning(f"Could not check button state: {e}")
+    #         
+    #         # Lưu URL hiện tại
+    #         current_url = self.driver.current_url
+    #         logger.info(f"Current URL: {current_url}")
+    #         
+    #         # Chờ URL thay đổi
+    #         logger.info("Waiting for URL change (checking every 3 seconds)...")
+    #         max_wait_time = 300  # 5 phút
+    #         elapsed_time = 0
+    #         
+    #         while elapsed_time < max_wait_time:
+    #             time.sleep(3)
+    #             elapsed_time += 3
+    #             
+    #             try:
+    #                 new_url = self.driver.current_url
+    #                 
+    #                 # Check for errors on page
+    #                 if elapsed_time % 9 == 0:  # Mỗi 9 giây
+    #                     errors = self.driver.execute_script("""
+    #                         var errors = [];
+    #                         var errorElems = document.querySelectorAll('.error, .alert, [class*="error"]');
+    #                         errorElems.forEach(function(elem) {
+    #                             if (elem.offsetParent !== null && elem.textContent.trim()) {
+    #                                 errors.push(elem.textContent.trim());
+    #                             }
+    #                         });
+    #                         return errors;
+    #                     """)
+    #                     if errors:
+    #                         logger.error(f"⚠️ Errors on page: {errors}")
+    #                 
+    #                 if new_url != current_url:
+    #                     logger.info(f"\n✓ URL changed! User clicked the button")
+    #                     logger.info(f"New URL: {new_url}")
+    #                     break
+    #                 
+    #                 if elapsed_time % 15 == 0:
+    #                     logger.info(f"Still waiting... ({elapsed_time}s elapsed)")
+    #                     
+    #             except Exception as e:
+    #                 logger.error(f"Error while waiting: {str(e)}")
+    #                 break
+    #         else:
+    #             logger.error(f"\n✗ Timeout after {max_wait_time}s")
+    #             return False
+    #         
+    #         # Đợi registration hoàn tất
+    #         logger.info("\n[STEP 5] Waiting for registration to complete...")
+    #         time.sleep(5)
+    #         
+    #         logger.info("\n" + "=" * 70)
+    #         logger.info("✓ REGISTRATION COMPLETED!")
+    #         logger.info("=" * 70)
+    #         
+    #         return True
+    #         
+    #     except Exception as e:
+    #         logger.error(f"\n✗ LỖI: {str(e)}")
+    #         import traceback
+    #         traceback.print_exc()
+    #         return False
+    
+    def run_login_workflow(self):
+        """
+        FLOW LOGIN - Theo flow từ ảnh đã cung cấp
+        Site: https://gameseal.com/
+        
+        B1: Icon person: #accountWidget > svg
+        B2: Click vào link "a" trong register-section
+        B3: Click vào login-wrapper > a
+        B4: #loginMail
+        B5: #loginPassword
+        B6: Click submit button trong form > div.login-submit
+        """
         try:
             logger.info("\n" + "="*70)
-            logger.info("GAMESEAL REGISTRATION WORKFLOW")
+            logger.info("GAMESEAL LOGIN WORKFLOW")
             logger.info("="*70)
             
             # Bước 1: Mở trang GameSeal
             logger.info("\n[STEP 1] Opening GameSeal homepage...")
             self.driver.get("https://gameseal.com")
-            time.sleep(5)
+            time.sleep(3)
             
-            # Bước 1.5: Đóng cookie popup
+            # Bước 1.5: Đóng cookie popup nếu có
             logger.info("\n[STEP 1.5] Closing cookie popup...")
             try:
                 cookie_btn = self.wait_for_element(By.CSS_SELECTOR, "button.cky-btn.cky-btn-accept", timeout=5)
@@ -838,192 +1031,183 @@ class GameSealAutoLogin:
             except:
                 logger.info("No cookie popup or already closed")
             
-            # Bước 2: Click Account button
-            logger.info("\n[STEP 2] Clicking Account button...")
+            # B1: Click Account icon (#accountWidget > svg)
+            logger.info("\n[B1] Clicking Account icon...")
             account_btn = self.wait_for_element(By.CSS_SELECTOR, "#accountWidget", timeout=15)
             if not account_btn:
                 logger.error("Account button not found!")
                 return False
+            self.click_element(account_btn, wait_time=2)
             
-            self.human_delay(1, 2)
-            if not self.click_element(account_btn, wait_time=2):
-                return False
+            # B2: Click vào link "a" trong div.register-section
+            logger.info("\n[B2] Clicking register-section link...")
             
-            # Bước 3: Click REGISTER link
-            logger.info("\n[STEP 3] Clicking REGISTER link...")
-            register_link = self.wait_for_element(By.CSS_SELECTOR, 'a.register-link[href="/account/register"]', timeout=5)
-            if not register_link:
-                logger.error("Register link not found!")
-                return False
+            # Đợi offcanvas mở hoàn toàn
+            time.sleep(1.5)
             
-            self.human_delay(0.5, 1.5)
-            if not self.click_element(register_link, wait_time=2):
-                return False
-            
-            # Bước 4: KHÔNG TỰ ĐỘNG ĐIỀN - CHỜ USER NHẬP
-            logger.info("\n[STEP 4] Waiting for registration page to load...")
-            
-            # Đợi form load
-            email_input = self.wait_for_element(By.CSS_SELECTOR, 'input[type="email"]', timeout=10)
-            if not email_input:
-                logger.error("Registration form not found!")
-                return False
-            
-            # Đợi thêm để trang load hoàn toàn
-            time.sleep(2)
-            
-            # PRINT THÔNG TIN CHO USER
-            logger.info("\n" + "="*70)
-            logger.info("📝 PLEASE FILL THE REGISTRATION FORM MANUALLY")
-            logger.info("="*70)
-            logger.info(f"📧 Email:    {self.register_email}")
-            logger.info(f"🔑 Password: {self.register_password}")
-            logger.info("="*70)
-            logger.info("⚠️  IMPORTANT:")
-            logger.info("   1. Enter the email above")
-            logger.info("   2. Enter the password above (twice)")
-            logger.info("   3. Check the newsletter checkbox (optional)")
-            logger.info("   4. Click the CONTINUE button")
-            logger.info("="*70)
-            
-            # CHỜ USER CLICK CONTINUE BUTTON
-            logger.info("\n" + "="*70)
-            logger.info("⏸️  WAITING FOR USER TO CLICK 'CONTINUE' BUTTON")
-            logger.info("="*70)
-            logger.info("Please click the CONTINUE button manually to proceed...")
-            
-            # Check button state trước
-            try:
-                button_check = self.driver.execute_script("""
-                    var btn = document.querySelector('button.btn-primary');
-                    if (btn) {
-                        return {
-                            text: btn.textContent.trim(),
-                            disabled: btn.disabled,
-                            classes: btn.className
-                        };
-                    }
-                    return null;
-                """)
-                logger.info(f"Button state before click: {button_check}")
-            except Exception as e:
-                logger.warning(f"Could not check button state: {e}")
-            
-            # Lưu URL hiện tại
-            current_url = self.driver.current_url
-            logger.info(f"Current URL: {current_url}")
-            
-            # Chờ URL thay đổi
-            logger.info("Waiting for URL change (checking every 3 seconds)...")
-            max_wait_time = 300  # 5 phút
-            elapsed_time = 0
-            
-            while elapsed_time < max_wait_time:
-                time.sleep(3)
-                elapsed_time += 3
-                
-                try:
-                    new_url = self.driver.current_url
-                    
-                    # Check for errors on page
-                    if elapsed_time % 9 == 0:  # Mỗi 9 giây
-                        errors = self.driver.execute_script("""
-                            var errors = [];
-                            var errorElems = document.querySelectorAll('.error, .alert, [class*="error"]');
-                            errorElems.forEach(function(elem) {
-                                if (elem.offsetParent !== null && elem.textContent.trim()) {
-                                    errors.push(elem.textContent.trim());
-                                }
-                            });
-                            return errors;
-                        """)
-                        if errors:
-                            logger.error(f"⚠️ Errors on page: {errors}")
-                    
-                    if new_url != current_url:
-                        logger.info(f"\n✓ URL changed! User clicked the button")
-                        logger.info(f"New URL: {new_url}")
-                        break
-                    
-                    if elapsed_time % 15 == 0:
-                        logger.info(f"Still waiting... ({elapsed_time}s elapsed)")
-                        
-                except Exception as e:
-                    logger.error(f"Error while waiting: {str(e)}")
-                    break
-            else:
-                logger.error(f"\n✗ Timeout after {max_wait_time}s")
-                return False
-            
-            # Đợi registration hoàn tất
-            logger.info("\n[STEP 5] Waiting for registration to complete...")
-            time.sleep(5)
-            
-            logger.info("\n" + "=" * 70)
-            logger.info("✓ REGISTRATION COMPLETED!")
-            logger.info("=" * 70)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"\n✗ LỖI: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def login_to_account(self):
-        """Login vào tài khoản GameSeal sau khi verify"""
-        try:
-            logger.info("Navigating to GameSeal login page...")
-            self.driver.get("https://gameseal.com/account/login")
-            time.sleep(3)
-            
-            # Nhập email
-            logger.info(f"Entering email: {self.register_email}")
-            email_input = self.wait_for_element(By.CSS_SELECTOR, "input[type='email']", timeout=10)
-            if not email_input:
-                logger.error("Could not find email input")
-                return False
-            
-            email_input.clear()
-            email_input.send_keys(self.register_email)
-            logger.info("✓ Entered email")
-            time.sleep(1)
-            
-            # Nhập password
-            logger.info("Entering password...")
-            password_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-            password_input.clear()
-            password_input.send_keys(self.register_password)
-            logger.info("✓ Entered password")
-            time.sleep(1)
-            
-            # Click Login button
-            logger.info("Clicking LOGIN button...")
-            login_btn_selectors = [
-                (By.XPATH, "//button[contains(text(), 'LOGIN')]"),
-                (By.XPATH, "//button[contains(text(), 'Log in')]"),
-                (By.CSS_SELECTOR, "button[type='submit']"),
-                (By.CSS_SELECTOR, ".btn-primary")
+            # Thử nhiều cách tìm register link
+            register_section_link = None
+            selectors_to_try = [
+                # Selector 0: Từ code cũ - ưu tiên cao nhất
+                ("CSS", "a.register-link[href='/account/register']"),
+                ("CSS", "a[href='/account/register'].register-link"),
+                # Selector 1: Full path
+                ("CSS", "body > header > div.header-container > div > div > div.col-12.order-1.col-sm-auto.order-sm-2.header-actions-col > div > div.offcanvas-body > div > div.register-section > div > a"),
+                # Selector 2: Ngắn hơn với register-section
+                ("CSS", "div.register-section > div > a"),
+                # Selector 3: Tìm theo text "REGISTER"
+                ("XPATH", "//a[contains(text(), 'REGISTER')]"),
+                # Selector 4: Tìm trong offcanvas-body
+                ("CSS", ".offcanvas-body .register-section a"),
+                # Selector 5: Tìm link có href register
+                ("CSS", "a[href*='register']"),
             ]
             
-            clicked = False
-            for by, selector in login_btn_selectors:
+            successful_selector = None
+            for selector_type, selector in selectors_to_try:
                 try:
-                    login_btn = WebDriverWait(self.driver, 3).until(
-                        EC.element_to_be_clickable((by, selector))
-                    )
-                    login_btn.click()
-                    logger.info("✓ Clicked LOGIN button")
-                    clicked = True
-                    break
+                    logger.info(f"[B2] Trying selector: {selector}")
+                    if selector_type == "CSS":
+                        register_section_link = self.wait_for_element(By.CSS_SELECTOR, selector, timeout=5)
+                    else:  # XPATH
+                        register_section_link = self.wait_for_element(By.XPATH, selector, timeout=5)
+                    
+                    if register_section_link:
+                        successful_selector = (selector_type, selector)
+                        logger.info(f"✅ [B2] SUCCESS with selector: {selector_type} = '{selector}'")
+                        logger.info(f"🔧 [B2] UPDATE CODE: Use this selector directly!")
+                        break
+                except Exception as e:
+                    logger.warning(f"[B2] Failed with selector: {selector} - {str(e)}")
+                    continue
+            
+            if not register_section_link:
+                logger.error("Register section link not found after trying all selectors!")
+                # Chụp screenshot để debug
+                try:
+                    screenshot_path = f"/tmp/register_not_found_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                except:
+                    pass
+                return False
+            
+            self.click_element(register_section_link, wait_time=2)
+            
+            # B3: Click vào login-wrapper > a
+            logger.info("\n[B3] Clicking login-wrapper link...")
+            
+            # Thử nhiều cách tìm login link
+            login_wrapper_link = None
+            login_selectors = [
+                # Selector 1: Full path
+                ("CSS", "body > main > div.container.m-md-auto > div > div > div.row > div.col-12.col-md-8.mx-auto.col-lg-5.col-xl-4.card-wrapper > div > div > div.login-wrapper > a"),
+                # Selector 2: Ngắn hơn với login-wrapper
+                ("CSS", "div.login-wrapper > a"),
+                # Selector 3: Tìm theo text có chứa "login" hoặc "sign in"
+                ("XPATH", "//a[contains(translate(text(), 'LOGIN', 'login'), 'login')]"),
+                # Selector 4: Tìm trong card-wrapper
+                ("CSS", ".card-wrapper .login-wrapper a"),
+                # Selector 5: Tìm link có href login
+                ("CSS", "a[href*='login']"),
+            ]
+            
+            for selector_type, selector in login_selectors:
+                try:
+                    logger.info(f"[B3] Trying login selector: {selector}")
+                    if selector_type == "CSS":
+                        login_wrapper_link = self.wait_for_element(By.CSS_SELECTOR, selector, timeout=5)
+                    else:  # XPATH
+                        login_wrapper_link = self.wait_for_element(By.XPATH, selector, timeout=5)
+                    
+                    if login_wrapper_link:
+                        logger.info(f"✅ [B3] SUCCESS with selector: {selector_type} = '{selector}'")
+                        logger.info(f"🔧 [B3] UPDATE CODE: Use this selector directly!")
+                        break
+                except Exception as e:
+                    logger.warning(f"[B3] Failed with login selector: {selector} - {str(e)}")
+                    continue
+            
+            if not login_wrapper_link:
+                logger.error("Login wrapper link not found after trying all selectors!")
+                try:
+                    screenshot_path = f"/tmp/login_not_found_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                except:
+                    pass
+                return False
+            
+            self.click_element(login_wrapper_link, wait_time=3)
+            
+            # Đợi trang login load
+            time.sleep(2)
+            
+            # Debug: Check current URL
+            current_url = self.driver.current_url
+            logger.info(f"Current URL after clicking login link: {current_url}")
+            
+            # B4: Nhập email vào #loginMail
+            logger.info("\n[B4] Entering email...")
+            
+            # Thử nhiều selector cho email input
+            email_selectors = [
+                (By.CSS_SELECTOR, "#loginMail"),
+                (By.CSS_SELECTOR, "input[type='email']"),
+                (By.CSS_SELECTOR, "input[name='email']"),
+                (By.XPATH, "//input[@id='loginMail']"),
+                (By.XPATH, "//input[@type='email']")
+            ]
+            
+            email_input = None
+            for by, selector in email_selectors:
+                try:
+                    logger.info(f"[B4] Trying email selector: {selector}")
+                    email_input = self.wait_for_element(by, selector, timeout=5)
+                    if email_input:
+                        logger.info(f"✅ [B4] SUCCESS with selector: {by} = '{selector}'")
+                        logger.info(f"🔧 [B4] UPDATE CODE: Use this selector directly!")
+                        break
                 except:
                     continue
             
-            if not clicked:
-                logger.error("Could not find LOGIN button")
+            if not email_input:
+                logger.error("Email input not found with any selector!")
+                # Take screenshot for debug
+                try:
+                    screenshot_path = f"/tmp/email_input_not_found_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                except:
+                    pass
                 return False
             
+            self.click_element(email_input, wait_time=0.5)
+            self.type_text_human_like(email_input, self.register_email)
+            logger.info(f"✓ Entered email: {self.register_email}")
+            
+            # B5: Nhập password vào #loginPassword
+            logger.info("\n[B5] Entering password...")
+            password_input = self.wait_for_element(By.CSS_SELECTOR, "#loginPassword", timeout=10)
+            if not password_input:
+                logger.error("Password input not found!")
+                return False
+            self.click_element(password_input, wait_time=0.5)
+            self.type_text_human_like(password_input, self.register_password)
+            logger.info("✓ Entered password")
+            
+            # B6: Click submit button
+            logger.info("\n[B6] Clicking login submit button...")
+            submit_btn = self.wait_for_element(By.CSS_SELECTOR,
+                "body > main > div.container.m-md-auto > div > div > div.row > div.col-12.col-md-8.mx-auto.col-lg-5.col-xl-4.card-wrapper > div > div > form > div.login-submit",
+                timeout=10)
+            if not submit_btn:
+                logger.error("Submit button not found!")
+                return False
+            self.click_element(submit_btn, wait_time=3)
+            
+            # Đợi login hoàn tất
+            logger.info("\n[STEP 7] Waiting for login to complete...")
             time.sleep(5)
             
             # Check if login successful
@@ -1031,15 +1215,146 @@ class GameSealAutoLogin:
             logger.info(f"Current URL after login: {current_url}")
             
             if "login" not in current_url.lower():
-                logger.info("✓ GameSeal login successful!")
-                logger.info("Ready for search and purchase flow...")
-                return True
+                logger.info("\n" + "=" * 70)
+                logger.info("✓ LOGIN SUCCESSFUL!")
+                logger.info("=" * 70)
+                
+                # Mở tab mới và truy cập lại GameSeal
+                logger.info("\n[STEP 8] Opening new tab and navigating to GameSeal...")
+                original_window = self.driver.current_window_handle
+                
+                # Mở tab mới
+                self.driver.switch_to.new_window('tab')
+                time.sleep(2)
+                
+                # Navigate đến GameSeal homepage
+                logger.info("Navigating to GameSeal homepage in new tab...")
+                self.driver.get("https://gameseal.com")
+                time.sleep(3)
+                
+                # Close cookie popup nếu có
+                try:
+                    cookie_btn = self.wait_for_element(By.CSS_SELECTOR, "button.cky-btn.cky-btn-accept", timeout=5)
+                    if cookie_btn:
+                        self.click_element(cookie_btn, wait_time=1)
+                        logger.info("✓ Closed cookie popup in new tab")
+                except:
+                    logger.info("No cookie popup in new tab")
+                
+                # Close notification popup "No thanks" nếu có
+                try:
+                    logger.info("Checking for notification popup...")
+                    # Thử nhiều selector cho No thanks button
+                    no_thanks_selectors = [
+                        # XPath chính xác từ user
+                        (By.XPATH, "/html/body/div[20]//div/div[2]/button[1]"),
+                        # Tìm button "No thanks" trong bất kỳ div nào
+                        (By.XPATH, "//button[contains(text(), 'No thanks') or contains(., 'No thanks')]"),
+                        # Tìm theo style/attributes của button
+                        (By.XPATH, "//button[contains(@style, 'rgb(255, 255, 255)')]"),
+                        # Backup selectors
+                        (By.CSS_SELECTOR, "div > div:nth-child(2) > button:nth-child(1)"),
+                        (By.XPATH, "//button[text()='No thanks']"),
+                        (By.CSS_SELECTOR, "button[aria-label='No thanks']"),
+                    ]
+                    
+                    no_thanks_btn = None
+                    for by, selector in no_thanks_selectors:
+                        try:
+                            logger.info(f"Trying No thanks selector: {selector}")
+                            no_thanks_btn = self.wait_for_element(by, selector, timeout=2)
+                            if no_thanks_btn:
+                                logger.info(f"✅ Found No thanks with: {selector}")
+                                break
+                        except:
+                            continue
+                    
+                    if no_thanks_btn:
+                        self.click_element(no_thanks_btn, wait_time=1)
+                        logger.info("✓ Closed notification popup (No thanks)")
+                    else:
+                        logger.info("No notification popup found")
+                except Exception as e:
+                    logger.info(f"No notification popup or error: {str(e)}")
+                
+                logger.info("✓ New tab opened and ready for shopping")
+                
+                # BƯỚC UPDATE PROFILE TRƯỚC KHI MUA HÀNG
+                logger.info("\n" + "=" * 70)
+                logger.info("[STEP 9] Updating profile information...")
+                logger.info("=" * 70)
+                
+                # Tạo user_data để update profile
+                user_data = {
+                    'first_name': 'John',
+                    'last_name': 'Doe',
+                    'address': '209 Coral Ridge Dr',
+                    'city': 'Garland',
+                    'phone': '+1234567890'
+                }
+                
+                # Click Account button
+                logger.info("\n[STEP 9.1] Clicking Account button...")
+                account_btn = self.wait_for_element(By.CSS_SELECTOR, "#accountWidget", timeout=15)
+                if not account_btn:
+                    logger.error("Account button not found!")
+                    return False
+                self.click_element(account_btn, wait_time=2)
+                
+                # Click Profile link
+                logger.info("\n[STEP 9.2] Clicking Profile link...")
+                profile_link = self.wait_for_element(By.XPATH, "//a[contains(@href, '/account/profile')]", timeout=10)
+                if not profile_link:
+                    logger.error("Profile link not found!")
+                    return False
+                self.click_element(profile_link, wait_time=2)
+                
+                # Fill profile form
+                logger.info("\n[STEP 9.3] Filling profile form...")
+                if not self.fill_profile_form(user_data):
+                    logger.error("Failed to fill profile!")
+                    return False
+                
+                logger.info("✓ Profile updated successfully")
+                
+                # GỌI WORKFLOW MUA HÀNG - VÒNG LẶP LIÊN TỤC
+                card_data = {
+                    'number': '4532015112830366',
+                    'exp_date': '12/25',
+                    'cvv': '123',
+                    'address': '209 Coral Ridge Dr',
+                    'city': 'Garland',
+                    'zip': '75044',
+                    'state': 'TX',
+                    'country': 'US'
+                }
+                
+                purchase_count = 0
+                while True:
+                    purchase_count += 1
+                    logger.info("\n" + "=" * 70)
+                    logger.info(f"[STEP 10] Starting purchase workflow #{purchase_count}...")
+                    logger.info("=" * 70)
+                    
+                    # Gọi complete_checkout để mua hàng
+                    purchase_result = self.complete_checkout(card_data)
+                    
+                    if not purchase_result:
+                        # Payment FAILED - dừng workflow, cần proxy và profile mới
+                        logger.error("✗ Purchase workflow failed!")
+                        logger.error("❌ STOPPING - Need new proxy and profile")
+                        return False
+                    else:
+                        # Payment SUCCESS - đã đợi 3 phút và back to home trong complete_checkout
+                        logger.info(f"✅ Purchase #{purchase_count} COMPLETED!")
+                        logger.info("🔄 Continuing to next purchase...")
+                        # Vòng lặp sẽ tiếp tục mua hàng tiếp theo
             else:
                 logger.warning("Still on login page, login may have failed")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error logging in to GameSeal: {str(e)}")
+            logger.error(f"\n✗ LỖI: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -1050,9 +1365,9 @@ def main():
     from multilogin import MultiLoginHandler
     from config import DEFAULT_FOLDER_ID
     
-    # Thông tin đăng nhập
-    EMAIL = "conn6ecrosson655@outlook.com"  # Outlook email
-    PASSWORD = "aH6hfAdsRZ35"  # Outlook password
+    # Thông tin đăng nhập GameSeal
+    EMAIL = "myra.april_38@outlook.com"  # Outlook email
+    PASSWORD = "Abc@12345"  # Outlook password
     
     # Thông tin proxy (cần có để tạo profile)
     PROXY_INFO = {
@@ -1073,7 +1388,7 @@ def main():
         
         try:
             logger.info("\n" + "="*70)
-            logger.info(f"ATTEMPT #{retry_count}: TẠO PROFILE -> START -> ĐĂNG KÝ -> MUA HÀNG")
+            logger.info(f"ATTEMPT #{retry_count}: TẠO PROFILE -> START -> LOGIN -> MUA HÀNG")
             logger.info("="*70)
             
             # Bước 1: Login vào Multilogin
@@ -1087,7 +1402,7 @@ def main():
             
             # Bước 2: Tạo profile mới
             logger.info("\n[STEP 2] Creating new profile...")
-            profile_name = f"GameSeal_{EMAIL.split('@')[0]}_{retry_count}"
+            profile_name = f"Test_GameSeal_{EMAIL.split('@')[0]}"
             create_success, create_result = multilogin_handler.create_profile(
                 proxy_info=PROXY_INFO,
                 folder_id=DEFAULT_FOLDER_ID,
@@ -1130,46 +1445,17 @@ def main():
                 continue  # Skip to next retry
             logger.info("✓ Connected to browser")
             
-            # Bước 5: Chạy workflow ĐĂNG KÝ
-            logger.info("\n[STEP 5] Running registration workflow...")
-            registration_success = automation.run_registration_workflow()
+            # Bước 5: Chạy workflow LOGIN + MUA HÀNG
+            logger.info("\n[STEP 5] Running login and purchase workflow...")
+            workflow_success = automation.run_login_workflow()
             
-            if not registration_success:
-                logger.error("❌ Registration failed - will retry with new profile")
-                continue  # Skip to next retry
-            
-            logger.info("✅ Registration completed!")
-            
-            # Bước 6: Chạy workflow MUA HÀNG (VÔ HẠN)
-            logger.info("\n[STEP 6] Running purchase workflow...")
-            
-            # Chuẩn bị data
-            user_data = {
-                'first_name': 'John',
-                'last_name': 'Doe',
-                'address': '209 Coral Ridge Dr',
-                'city': 'Garland',
-                'phone': '+1234567890'
-            }
-            
-            card_data = {
-                'number': '4111111111111111',
-                'exp_date': '12/25',
-                'cvv': '123',
-                'address': '209 Coral Ridge Dr',
-                'zip': '75044',
-                'city': 'Garland'
-            }
-            
-            # Gọi run_full_purchase_workflow - có vòng lặp vô hạn bên trong
-            purchase_success = automation.run_full_purchase_workflow(user_data, card_data)
-            
-            if not purchase_success:
-                # Payment FAILED - cleanup và retry với profile mới
-                logger.error("❌ Purchase workflow failed - will retry with new profile")
+            if workflow_success:
+                # Workflow thành công - nhưng vẫn tiếp tục vòng lặp (không bao giờ dừng)
+                logger.info("\n✅ SUCCESS! Workflow completed - but this should not happen (infinite loop inside)")
+                # Không return, để tiếp tục vòng lặp
             else:
-                # Không bao giờ đến đây vì có vòng lặp vô hạn bên trong
-                logger.info("✅ Purchase workflow completed (should not reach here)")
+                # Workflow failed (payment failed) - cleanup và retry với profile mới
+                logger.error("\n❌ FAILED! Workflow failed - will retry with new profile")
             
         except Exception as e:
             logger.error(f"\n❌ Error in attempt #{retry_count}: {str(e)}")
@@ -1183,6 +1469,7 @@ def main():
                 try:
                     # Stop profile trước khi xóa
                     multilogin_handler.stop_profile(profile_id, DEFAULT_FOLDER_ID)
+                    import time
                     time.sleep(2)
                     
                     # Xóa profile
@@ -1195,15 +1482,28 @@ def main():
                     logger.warning(f"Error during cleanup: {str(e)}")
         
         # Đợi một chút trước khi retry (nếu failed)
-        logger.info("\n⏰ Waiting 5 seconds before retry...")
-        time.sleep(5)
-        logger.info("🔄 Retrying with new profile and proxy...")
+        if not workflow_success:
+            logger.info("\n⏰ Waiting 5 seconds before retry...")
+            import time
+            time.sleep(5)
+            logger.info("🔄 Retrying with new profile and proxy...")
         # Vòng lặp while True sẽ tự động tiếp tục
 
 
 if __name__ == "__main__":
     try:
+        logger.info("\n" + "="*70)
+        logger.info("GAMESEAL AUTO BUY - TEST WORKFLOW")
+        logger.info("="*70)
         success = main()
+        
+        logger.info("\n" + "="*70)
+        if success:
+            logger.info("✅ WORKFLOW HOÀN THÀNH THÀNH CÔNG")
+        else:
+            logger.info("❌ WORKFLOW THẤT BẠI")
+        logger.info("="*70)
+        
         exit(0 if success else 1)
     except KeyboardInterrupt:
         logger.info("\n⚠️  Interrupted by user")
