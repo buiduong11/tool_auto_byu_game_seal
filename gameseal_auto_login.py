@@ -522,6 +522,8 @@ class GameSealAutoLogin:
             failed_selectors = [
                 # Text cụ thể cho failed
                 (By.XPATH, "//*[contains(text(), 'Transaction not authenticated')]"),
+                (By.XPATH, "//*[contains(text(), 'Transaction blocked')]"),
+                (By.XPATH, "//*[contains(text(), 'blocked by bank')]"),
                 (By.XPATH, "//*[contains(text(), 'failed authentication')]"),
                 (By.XPATH, "//*[contains(text(), 'transaction failed')]"),
                 (By.XPATH, "//h1[contains(text(), 'Failed') or contains(text(), 'Error')]"),
@@ -538,7 +540,7 @@ class GameSealAutoLogin:
                         # Verify bằng cách check text
                         try:
                             elem_text = failed_elem.text.lower()
-                            if "not authenticated" in elem_text or "failed" in elem_text or "declined" in elem_text or "error" in elem_text:
+                            if "not authenticated" in elem_text or "failed" in elem_text or "declined" in elem_text or "error" in elem_text or "blocked" in elem_text:
                                 logger.error(f"❌ Found FAILED indicator: {selector}")
                                 logger.error(f"   Text: {failed_elem.text}")
                                 failed_found = True

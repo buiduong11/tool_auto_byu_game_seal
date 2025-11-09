@@ -147,6 +147,16 @@ class MultiLoginHandler:
                     "fingerprint": {
                         "ports": []
                     },
+                    "geolocation": {
+                        "mode": "manual",
+                        "latitude": 37.7749,  # San Francisco
+                        "longitude": -122.4194,
+                        "accuracy": 10
+                    },
+                    "timezone": {
+                        "mode": "manual",
+                        "value": "America/Los_Angeles"  # US Pacific Time
+                    },
                     "flags": {
                         "navigator_masking": "mask",
                         "audio_masking": "natural",

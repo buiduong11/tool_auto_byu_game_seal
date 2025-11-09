@@ -24,6 +24,49 @@ from proxy_handler import NineProxyHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def parse_mail_data(lines, start_index):
+    """
+    Parse mail data từ file - hỗ trợ 2 format:
+    
+    Format 1 (SIMPLE - 2 dòng):
+    email@domain.com
+    password123
+    
+    Format 2 (2FA - 4 dòng):
+    email@domain.com
+    password123
+    backup_email@domain.com
+    backup_code
+    
+    Returns:
+        tuple: (email, password, backup_email, backup_code, lines_consumed)
+        Nếu simple: backup_email và backup_code = None
+    """
+    if start_index >= len(lines):
+        return None, None, None, None, 0
+    
+    # Đọc 2 dòng đầu (luôn có)
+    email = lines[start_index].strip()
+    password = lines[start_index + 1].strip() if start_index + 1 < len(lines) else ""
+    
+    # Check xem có 2 dòng tiếp theo không (2FA format)
+    if start_index + 3 < len(lines):
+        # Kiểm tra dòng thứ 3 có phải wmhotmail email hoặc số không
+        potential_backup = lines[start_index + 2].strip()
+        potential_code = lines[start_index + 3].strip() if start_index + 3 < len(lines) else ""
+        
+        # 2FA format: dòng 3 là wmhotmail email HOẶC số (code)
+        # Nếu dòng 3 là số → format: email, pass, code_number, wmhotmail
+        # Nếu dòng 3 là @wmhotmail → format: email, pass, wmhotmail, code
+        if '@wmhotmail.com' in potential_backup or potential_backup.isdigit():
+            # Format 2FA
+            backup_email = potential_backup
+            backup_code = potential_code
+            return email, password, backup_email, backup_code, 4
+    
+    # Format SIMPLE
+    return email, password, None, None, 2
+
 def parse_card_data(card_line):
     """
     Parse card data từ format MỚI:
@@ -68,22 +111,24 @@ def parse_card_data(card_line):
         return None
 
 class OutlookRegistrationFlow:
-    def __init__(self, outlook_email, outlook_password, wmhotmail_email, wmhotmail_code, 
-                 multilogin_profile_id=None):
+    def __init__(self, outlook_email, outlook_password, wmhotmail_email=None, wmhotmail_code=None, 
+                 multilogin_profile_id=None, is_simple=False):
         """
         Initialize Outlook registration flow
         
         Args:
-            outlook_email: Outlook email chính (vd: catalinaart14_01582@outlook.com)
-            outlook_password: Outlook password
-            wmhotmail_email: WMHotmail email phụ (vd: p77jah@wmhotmail.com)
-            wmhotmail_code: WMHotmail code để login
-            multilogin_profile_id: Multilogin profile ID (optional)
+            outlook_email: Email Outlook chính
+            outlook_password: Password Outlook
+            wmhotmail_email: Email backup (optional, chỉ cho 2FA)
+            wmhotmail_code: Code backup (optional, chỉ cho 2FA)
+            multilogin_profile_id: ID của Multilogin profile
+            is_simple: True nếu login simple (không cần 2FA)
         """
         self.outlook_email = outlook_email
         self.outlook_password = outlook_password
         self.wmhotmail_email = wmhotmail_email
         self.wmhotmail_code = wmhotmail_code
+        self.is_simple = is_simple
         self.multilogin_profile_id = multilogin_profile_id
         self.driver = None  # Chrome driver cho mail
         self.gameseal_automation = None  # GameSealAutoLogin instance
@@ -93,6 +138,18 @@ class OutlookRegistrationFlow:
     def start_browser(self):
         """Mở Chrome browser mới cho mail"""
         try:
+            # Check nếu browser đã tồn tại thì không tạo mới
+            if self.driver:
+                try:
+                    # Test xem browser còn hoạt động không
+                    self.driver.current_url
+                    logger.info("✓ Browser already running, reusing existing instance")
+                    return True
+                except:
+                    # Browser đã đóng, tạo mới
+                    logger.info("Previous browser closed, creating new one...")
+                    self.driver = None
+            
             logger.info("Starting Chrome browser for mail...")
             options = webdriver.ChromeOptions()
             # Thêm options để tránh detection
@@ -160,6 +217,110 @@ class OutlookRegistrationFlow:
             
         except Exception as e:
             logger.error(f"Error starting Multilogin: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def login_outlook_simple(self, email, password):
+        """
+        Login Outlook SIMPLE - không cần 2FA (wmhotmail)
+        Dùng cho email format: email + password (2 dòng)
+        """
+        try:
+            logger.info("\n" + "="*70)
+            logger.info("[SIMPLE LOGIN] Logging in to Outlook...")
+            logger.info("="*70)
+            
+            # Mở Outlook login
+            logger.info(f"Opening https://login.live.com...")
+            self.driver.get("https://login.live.com")
+            time.sleep(5)
+            
+            logger.info(f"Current URL: {self.driver.current_url}")
+            
+            # Nhập email
+            logger.info(f"Entering Outlook email: {email}")
+            logger.info("Waiting for email input...")
+            
+            # Thử nhiều selector
+            email_input = None
+            selectors = [
+                ("name", "loginfmt"),
+                ("id", "i0116"),
+                ("css selector", "input[type='email']")
+            ]
+            
+            for method, selector in selectors:
+                try:
+                    logger.info(f"Trying selector: {method}={selector}")
+                    if method == "name":
+                        email_input = WebDriverWait(self.driver, 3).until(
+                            EC.presence_of_element_located((By.NAME, selector))
+                        )
+                    elif method == "id":
+                        email_input = WebDriverWait(self.driver, 3).until(
+                            EC.presence_of_element_located((By.ID, selector))
+                        )
+                    else:
+                        email_input = WebDriverWait(self.driver, 3).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                    logger.info(f"✓ Email input found with: {method}={selector}")
+                    break
+                except:
+                    continue
+            
+            if not email_input:
+                logger.error("✗ Could not find email input!")
+                return False
+            
+            email_input.clear()
+            email_input.send_keys(email)
+            time.sleep(1)
+            email_input.send_keys(Keys.RETURN)
+            time.sleep(5)
+            
+            # Nhập password
+            logger.info("Entering password...")
+            logger.info("Waiting for password input (name='passwd')...")
+            
+            password_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "passwd"))
+            )
+            logger.info("✓ Password input found")
+            
+            password_input.clear()
+            password_input.send_keys(password)
+            time.sleep(1)
+            password_input.send_keys(Keys.RETURN)
+            time.sleep(10)
+            
+            # Check "Stay signed in" prompt
+            try:
+                stay_signed_in = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "idBtn_Back"))
+                )
+                stay_signed_in.click()
+                logger.info("✓ Clicked 'No' on Stay signed in")
+                time.sleep(3)
+            except:
+                logger.info("No 'Stay signed in' prompt found")
+            
+            logger.info("✓ Outlook simple login successful!")
+            
+            # Mở inbox
+            logger.info("Opening Outlook inbox...")
+            self.driver.get("https://outlook.live.com/mail/0/")
+            time.sleep(5)
+            
+            # Lưu window handle để verify email sau này
+            self.outlook_tab = self.driver.current_window_handle
+            logger.info(f"✓ Saved Outlook tab handle: {self.outlook_tab}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in simple login: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -1050,34 +1211,46 @@ class OutlookRegistrationFlow:
             
             # Không cần start Multilogin ở đây - gameseal_auto_login.py sẽ tự làm
             
-            # Step 1: Login wmhotmail
-            logger.info("[FLOW] Step 1: Login wmhotmail...")
-            if not self.login_wmhotmail():
-                logger.error("[FLOW] ✗ Failed at: login_wmhotmail()")
-                return False
-            logger.info("[FLOW] ✓ Step 1 completed")
-            
-            # Step 2: Login Outlook
-            logger.info("[FLOW] Step 2: Login Outlook...")
-            if not self.login_outlook():
-                logger.error("[FLOW] ✗ Failed at: login_outlook()")
-                return False
-            logger.info("[FLOW] ✓ Step 2 completed")
-            
-            # Step 3: Get verification code from wmhotmail
-            logger.info("[FLOW] Step 3: Get verification code...")
-            code = self.get_verification_code_from_wmhotmail()
-            if not code:
-                logger.error("[FLOW] ✗ Failed at: get_verification_code_from_wmhotmail()")
-                return False
-            logger.info("[FLOW] ✓ Step 3 completed")
-            
-            # Step 4: Verify Outlook with code
-            logger.info("[FLOW] Step 4: Verify Outlook with code...")
-            if not self.verify_outlook_with_code(code):
-                logger.error("[FLOW] ✗ Failed at: verify_outlook_with_code()")
-                return False
-            logger.info("[FLOW] ✓ Step 4 completed")
+            # Check login type và gọi đúng hàm
+            if self.is_simple:
+                # SIMPLE LOGIN - chỉ cần email + password
+                logger.info("[FLOW] Using SIMPLE LOGIN (no 2FA)")
+                if not self.login_outlook_simple(self.outlook_email, self.outlook_password):
+                    logger.error("[FLOW] ✗ Failed at: login_outlook_simple()")
+                    return False
+                logger.info("[FLOW] ✓ Step 1 completed")
+            else:
+                # 2FA LOGIN - cần wmhotmail
+                logger.info("[FLOW] Using 2FA LOGIN")
+                
+                # Step 1: Login wmhotmail
+                logger.info("[FLOW] Step 1: Login wmhotmail...")
+                if not self.login_wmhotmail():
+                    logger.error("[FLOW] ✗ Failed at: login_wmhotmail()")
+                    return False
+                logger.info("[FLOW] ✓ Step 1 completed")
+                
+                # Step 2: Login Outlook
+                logger.info("[FLOW] Step 2: Login Outlook...")
+                if not self.login_outlook():
+                    logger.error("[FLOW] ✗ Failed at: login_outlook()")
+                    return False
+                logger.info("[FLOW] ✓ Step 2 completed")
+                
+                # Step 3: Get verification code from wmhotmail
+                logger.info("[FLOW] Step 3: Get verification code...")
+                code = self.get_verification_code_from_wmhotmail()
+                if not code:
+                    logger.error("[FLOW] ✗ Failed at: get_verification_code_from_wmhotmail()")
+                    return False
+                logger.info("[FLOW] ✓ Step 3 completed")
+                
+                # Step 4: Verify Outlook with code
+                logger.info("[FLOW] Step 4: Verify Outlook with code...")
+                if not self.verify_outlook_with_code(code):
+                    logger.error("[FLOW] ✗ Failed at: verify_outlook_with_code()")
+                    return False
+                logger.info("[FLOW] ✓ Step 4 completed")
             
             # Step 5: Gọi gameseal_auto_login.py để xử lý phần GameSeal
             logger.info("\n" + "="*70)
@@ -1087,15 +1260,16 @@ class OutlookRegistrationFlow:
             try:
                 logger.info(f"Registering GameSeal with email: {self.outlook_email}")
                 
-                # Step 1: Get proxy
-                logger.info("Getting proxy from 9Proxy...")
-                proxy_handler = NineProxyHandler()
-                success, proxy_info = proxy_handler.get_next_proxy()
-                if not success:
-                    logger.error(f"Failed to get proxy: {proxy_info.get('error')}")
-                    return False
-                
-                logger.info(f"✓ Got proxy: {proxy_info['host']}:{proxy_info['port']}")
+                # Step 1: Use 9Proxy local forwarding
+                logger.info("Using 9Proxy local forwarding...")
+                proxy_info = {
+                    "type": "http",  # HTTP protocol
+                    "host": "127.0.0.1",  # Local forwarding
+                    "port": 60005,  # 9Proxy port
+                    "username": "",  # No auth for local forwarding
+                    "password": ""
+                }
+                logger.info(f"✓ Using proxy: {proxy_info['host']}:{proxy_info['port']} (9Proxy local)")
                 
                 # Step 2: Login Multilogin
                 multilogin_handler = MultiLoginHandler()
@@ -1192,9 +1366,9 @@ if __name__ == "__main__":
     import sys
     
     # Đọc data từ file
-    data_file = "/Users/mac/Documents/tool_auto_buy/data/data_mail/data_mail.txt"
-    card_file = "/Users/mac/Documents/tool_auto_buy/data/data_ci/data_ci.txt"
-    index_file = "/Users/mac/Documents/tool_auto_buy/data/data_mail/current_index.txt"
+    data_file = "/Users/buidangduong/Documents/tool_auto_buy/data/data_mail/data_mail.txt"
+    card_file = "/Users/buidangduong/Documents/tool_auto_buy/data/data_ci/data_ci.txt"
+    index_file = "/Users/buidangduong/Documents/tool_auto_buy/data/data_mail/current_index.txt"
     
     if not os.path.exists(data_file):
         logger.error(f"Data file not found: {data_file}")
@@ -1203,22 +1377,37 @@ if __name__ == "__main__":
     with open(data_file, 'r') as f:
         lines = [line.strip() for line in f.readlines() if line.strip()]
     
-    if len(lines) < 4:
-        logger.error("Data file must have at least 4 lines")
+    if len(lines) < 2:
+        logger.error("Data file must have at least 2 lines (email + password)")
         sys.exit(1)
     
-    # Parse mail data thành các bộ (mỗi bộ 4 dòng)
+    # Parse mail data - hỗ trợ cả 2 format (simple 2 dòng và 2FA 4 dòng)
     mail_sets = []
-    for i in range(0, len(lines), 4):
-        if i + 3 < len(lines):
-            mail_sets.append({
-                'outlook_email': lines[i],
-                'outlook_password': lines[i + 1],
-                'wmhotmail_email': lines[i + 2],
-                'wmhotmail_code': lines[i + 3]
-            })
+    i = 0
+    while i < len(lines):
+        email, password, backup_email, backup_code, lines_consumed = parse_mail_data(lines, i)
+        
+        if email and password:
+            mail_set = {
+                'outlook_email': email,
+                'outlook_password': password,
+                'is_simple': backup_email is None,  # True nếu không có backup email
+            }
+            
+            if backup_email:
+                # Format 2FA
+                mail_set['wmhotmail_email'] = backup_email
+                mail_set['wmhotmail_code'] = backup_code
+            
+            mail_sets.append(mail_set)
+            i += lines_consumed
+        else:
+            break
     
     logger.info(f"Found {len(mail_sets)} mail set(s) in data file")
+    for idx, mail_set in enumerate(mail_sets):
+        login_type = "SIMPLE" if mail_set['is_simple'] else "2FA"
+        logger.info(f"  Mail {idx}: {mail_set['outlook_email']} ({login_type})")
     
     # Đọc card data
     card_sets = []
@@ -1245,114 +1434,94 @@ if __name__ == "__main__":
         except:
             current_index = 0
     
-    # Check xem còn mail để xử lý không
-    if current_index >= len(mail_sets):
-        logger.info("All mail sets have been processed!")
-        logger.info("Resetting index to 0...")
-        current_index = 0
-    
-    # Lấy bộ mail hiện tại
-    mail_data = mail_sets[current_index]
-    
-    # Lấy card data tương ứng (nếu có)
-    card_data = None
-    if card_sets and current_index < len(card_sets):
-        card_data = card_sets[current_index]
-        logger.info(f"Using card: {card_data['number'][:4]}...{card_data['number'][-4:]}")
-    else:
-        logger.warning("No card data available for this index, will use default")
-    
-    logger.info("\n" + "="*70)
-    logger.info(f"PROCESSING MAIL SET {current_index + 1}/{len(mail_sets)}")
-    logger.info("="*70)
-    logger.info(f"  Outlook: {mail_data['outlook_email']}")
-    logger.info(f"  WMHotmail: {mail_data['wmhotmail_email']}")
-    
-    # Multilogin profile ID (có thể lấy từ config hoặc hardcode)
-    # walmart CA 6 - port 60005
-    MULTILOGIN_PROFILE_ID = "4e32caab-be06-45e2-8691-aaa66400c776"
-    
-    logger.info("\n⚠️  IMPORTANT: Make sure Multilogin app is running before starting!")
-    logger.info("Waiting 3 seconds...")
-    time.sleep(3)
-    
-    flow = OutlookRegistrationFlow(
-        outlook_email=mail_data['outlook_email'],
-        outlook_password=mail_data['outlook_password'],
-        wmhotmail_email=mail_data['wmhotmail_email'],
-        wmhotmail_code=mail_data['wmhotmail_code'],
-        multilogin_profile_id=MULTILOGIN_PROFILE_ID
-    )
-    
-    success = flow.run_full_flow(card_data)
-    
-    logger.info("\n" + "="*70)
-    if success:
-        logger.info(f"✓ Mail set {current_index + 1} completed successfully!")
+    # VÒNG LẶP xử lý tất cả mail sets
+    while current_index < len(mail_sets):
+        # Lấy bộ mail hiện tại
+        mail_data = mail_sets[current_index]
         
-        # MUA LẦN 2 - Giữ browser và profile, chỉ chạy lại checkout
+        # Lấy card data tương ứng (nếu có)
+        card_data = None
+        if card_sets and current_index < len(card_sets):
+            card_data = card_sets[current_index]
+            logger.info(f"Using card: {card_data['number'][:4]}...{card_data['number'][-4:]}")
+        else:
+            logger.warning("No card data available for this index, will use default")
+        
         logger.info("\n" + "="*70)
-        logger.info("🔄 PURCHASING AGAIN (2nd time)...")
+        logger.info(f"PROCESSING MAIL SET {current_index + 1}/{len(mail_sets)}")
         logger.info("="*70)
+        logger.info(f"  Outlook: {mail_data['outlook_email']}")
         
-        try:
-            # Chạy lại checkout với cùng card data
+        if mail_data['is_simple']:
+            logger.info(f"  Type: SIMPLE LOGIN (no 2FA)")
+        else:
+            logger.info(f"  Type: 2FA LOGIN")
+            logger.info(f"  WMHotmail: {mail_data['wmhotmail_email']}")
+        
+        # Multilogin profile ID (có thể lấy từ config hoặc hardcode)
+        # walmart CA 6 - port 60005
+        MULTILOGIN_PROFILE_ID = "4e32caab-be06-45e2-8691-aaa66400c776"
+        
+        logger.info("\n⚠️  IMPORTANT: Make sure Multilogin app is running before starting!")
+        logger.info("Waiting 3 seconds...")
+        time.sleep(3)
+        
+        # Tạo flow
+        flow = OutlookRegistrationFlow(
+            outlook_email=mail_data['outlook_email'],
+            outlook_password=mail_data['outlook_password'],
+            wmhotmail_email=mail_data.get('wmhotmail_email'),
+            wmhotmail_code=mail_data.get('wmhotmail_code'),
+            multilogin_profile_id=MULTILOGIN_PROFILE_ID,
+            is_simple=mail_data['is_simple']
+        )
+        
+        success = flow.run_full_flow(card_data)
+        
+        logger.info("\n" + "="*70)
+        if success:
+            logger.info(f"✓ Mail set {current_index + 1} completed successfully!")
+            logger.info("✓ Full flow completed!")
+            # Tăng index sau khi thành công
+            current_index += 1
+            with open(index_file, 'w') as f:
+                f.write(str(current_index))
+            logger.info(f"✓ Saved progress (next index: {current_index})")
+        else:
+            logger.error(f"✗ Mail set {current_index + 1} failed!")
+            
+            # Đóng CẢ 2 browsers khi mua thất bại
+            logger.info("\n" + "="*70)
+            logger.info("Closing all browsers due to failure...")
+            logger.info("="*70)
+            
+            if flow.driver:
+                try:
+                    flow.driver.quit()
+                    logger.info("✓ Chrome browser closed")
+                except Exception as e:
+                    logger.error(f"Error closing Chrome: {str(e)}")
+            
             if flow.gameseal_automation and flow.gameseal_automation.driver:
-                second_purchase_success = flow.gameseal_automation.complete_checkout(card_data)
-                
-                if second_purchase_success:
-                    logger.info("✅ Second purchase completed successfully!")
-                else:
-                    logger.warning("⚠️ Second purchase failed, but first purchase was successful")
-        except Exception as e:
-            logger.error(f"Error during second purchase: {str(e)}")
-            logger.warning("⚠️ Second purchase failed, but first purchase was successful")
-        
-        # Lưu index tiếp theo
-        next_index = current_index + 1
-        with open(index_file, 'w') as f:
-            f.write(str(next_index))
-        logger.info(f"Next run will process mail set {next_index + 1}/{len(mail_sets)}")
-        
-        # Tự động đóng browsers sau khi mua 2 lần xong
-        logger.info("\n" + "="*70)
-        logger.info("✓ Closing browsers...")
-        logger.info("="*70)
-        
-        if flow.driver:
-            try:
-                flow.driver.quit()
-                logger.info("✓ Chrome browser closed")
-            except Exception as e:
-                logger.error(f"Error closing Chrome: {str(e)}")
-        
-        if flow.gameseal_automation and flow.gameseal_automation.driver:
-            try:
-                flow.gameseal_automation.driver.quit()
-                logger.info("✓ Multilogin browser closed")
-            except Exception as e:
-                logger.error(f"Error closing Multilogin: {str(e)}")
-        
-        logger.info("✓ Session completed (2 purchases). Ready for next run.")
-    else:
-        logger.error(f"✗ Mail set {current_index + 1} failed!")
-        
-        # Đóng browser và skip sang email tiếp theo
-        logger.info("Closing browsers and moving to next email...")
-        if flow.driver:
-            try:
-                flow.driver.quit()
-            except:
-                pass
-        if flow.gameseal_automation and flow.gameseal_automation.driver:
-            try:
-                flow.gameseal_automation.driver.quit()
-            except:
-                pass
-        
-        # Skip sang email tiếp theo
-        next_index = current_index + 1
-        with open(index_file, 'w') as f:
-            f.write(str(next_index))
-        logger.info(f"✓ Skipped to next mail set {next_index + 1}/{len(mail_sets)}")
-        logger.info("Please run the script again to process the next email.")
+                try:
+                    flow.gameseal_automation.driver.quit()
+                    logger.info("✓ Multilogin browser closed")
+                except Exception as e:
+                    logger.error(f"Error closing Multilogin: {str(e)}")
+            
+            # Tăng index để chuyển sang mail set tiếp theo
+            current_index += 1
+            with open(index_file, 'w') as f:
+                f.write(str(current_index))
+            
+            logger.info(f"\n✓ Moved to next mail set (index: {current_index})")
+            logger.info("🔄 Continuing with next mail set...\n")
+            time.sleep(5)  # Đợi 5 giây trước khi chuyển sang mail tiếp theo
+    
+    # Khi đã xử lý hết tất cả mail sets
+    logger.info("\n" + "="*70)
+    logger.info("✅ ALL MAIL SETS PROCESSED!")
+    logger.info("="*70)
+    logger.info("Resetting index to 0 for next run...")
+    with open(index_file, 'w') as f:
+        f.write("0")
